@@ -142,7 +142,19 @@ func (client *Client) Get(key string) (*Item, error) {
 
 // MultiGet retrieve bulk items with some keys
 func (client *Client) MultiGet(keys []string) (map[string]*Item, error) {
-	return client.protocol.fetch(keys)
+	ks := make([]string, 0, len(keys))
+	for _, key := range keys {
+		exists := false
+		for _, k := range ks {
+			if k == key {
+				exists = true
+			}
+		}
+		if !exists {
+			ks = append(ks, key)
+		}
+	}
+	return client.protocol.fetch(ks)
 }
 
 // Delete explicit deletion of items

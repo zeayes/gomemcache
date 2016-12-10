@@ -49,8 +49,6 @@ func (pool *Pool) Get() (Conn, error) {
 		if err != nil {
 			return nil, err
 		}
-		ic := &idleConn{conn: c, idleAt: nowFunc()}
-		pool.idleConns = append(pool.idleConns, ic)
 		return c, nil
 	}
 	expiredSince := nowFunc().Add(-pool.IdleTimeout)

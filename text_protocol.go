@@ -5,6 +5,7 @@ package gomemcache
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -102,6 +103,34 @@ func (protocol TextProtocol) checkError(buf []byte, err error) error {
 	return fmt.Errorf("server response error %s doesn't define", string(buf))
 }
 
+func (protocol TextProtocol) parseResponseLine(line []byte) (*Item, int, error) {
+	// strip \r\n
+	if !bytes.Equal(line[:5], []byte("VALUE")) || !bytes.Equal(line[len(line)-2:], []byte("\r\n")) {
+		return nil, 0, errors.New("The server responses error value format")
+	}
+	values := bytes.Split(line[:len(line)-2], []byte(" "))
+	length := len(values)
+	if length != 4 && length != 5 {
+		return nil, 0, errors.New("The server responses error value format")
+	}
+	size, err := strconv.Atoi(string(values[3]))
+	if err != nil {
+		return nil, 0, err
+	}
+	flags, err := strconv.ParseUint(string(values[2]), 10, 32)
+	if err != nil {
+		return nil, 0, err
+	}
+	item := &Item{Key: string(values[1]), Flags: uint32(flags)}
+	item.Key = string(values[1])
+	if length == 5 {
+		if item.CAS, err = strconv.ParseUint(string(values[4]), 10, 64); err != nil {
+			return nil, 0, err
+		}
+	}
+	return item, size, nil
+}
+
 func (protocol TextProtocol) fetch(keys []string) (map[string]*Item, error) {
 	buffer := new(bytes.Buffer)
 	buffer.WriteString("gets ")
@@ -125,16 +154,8 @@ func (protocol TextProtocol) fetch(keys []string) (map[string]*Item, error) {
 			protocol.pool.Put(conn)
 			return result, nil
 		}
-		pattern := "VALUE %s %d %d %d\r\n"
-		item := new(Item)
-		var size int
-		dest := []interface{}{&item.Key, &item.Flags, &size, &item.CAS}
-		if bytes.Count(line, []byte(" ")) == 3 {
-			pattern = "VALUE %s %d %d\r\n"
-			dest = dest[:3]
-		}
-		n, err := fmt.Sscanf(string(line), pattern, dest...)
-		if err != nil || n != len(dest) {
+		item, size, err := protocol.parseResponseLine(line)
+		if err != nil {
 			conn.Close()
 			return nil, err
 		}

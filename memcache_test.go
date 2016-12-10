@@ -86,13 +86,13 @@ func TestAdd(t *testing.T) {
 	for _, testcase := range testcases {
 		key := fmt.Sprintf("test_%s_%s_key", testcase.protocol, testcase.command)
 		value := []byte(fmt.Sprintf("test_%s_%s_value", testcase.protocol, testcase.command))
-		if err := client.Delete(key); err != nil && err != ErrItemNotFound {
+		if err := testcase.client.Delete(key); err != nil && err != ErrItemNotFound {
 			t.Fatalf("test %s add delete error: %v", testcase.protocol, err)
 		}
-		if err := client.Add(&Item{Key: key, Value: value}); err != nil {
+		if err := testcase.client.Add(&Item{Key: key, Value: value}); err != nil {
 			t.Fatalf("test %s add error: %v", testcase.protocol, err)
 		}
-		err := client.Add(&Item{Key: key, Value: value})
+		err := testcase.client.Add(&Item{Key: key, Value: value})
 		if err == nil {
 			t.Fatalf("test %s add second execute should error", testcase.protocol)
 		}
@@ -107,19 +107,19 @@ func TestCAS(t *testing.T) {
 	for _, testcase := range testcases {
 		key := fmt.Sprintf("test_%s_%s_key", testcase.protocol, testcase.command)
 		value := []byte(fmt.Sprintf("test_%s_%s_value", testcase.protocol, testcase.command))
-		if err := client.Set(&Item{Key: key, Value: value}); err != nil {
-			t.Fatalf("cas set error: %v", err)
+		if err := testcase.client.Set(&Item{Key: key, Value: value}); err != nil {
+			t.Fatalf("cas %s first set error: %v", testcase.protocol, err)
 		}
-		item, err := client.Get(key)
+		item, err := testcase.client.Get(key)
 		if err != nil {
-			t.Fatalf("cas get error: %v", err)
+			t.Fatalf("cas %s get error: %v", testcase.protocol, err)
 		}
-		if err = client.Set(&Item{Key: key, Value: []byte("test_value_cas_2")}); err != nil {
-			t.Fatalf("cas set error: %v", err)
+		if err = testcase.client.Set(&Item{Key: key, Value: []byte("test_value_cas_2")}); err != nil {
+			t.Fatalf("cas %s second set error: %v", testcase.protocol, err)
 		}
-		err = client.Set(&Item{Key: key, Value: []byte("test_value_cas_3"), CAS: item.CAS})
+		err = testcase.client.CAS(&Item{Key: key, Value: []byte("test_value_cas_3"), CAS: item.CAS})
 		if err == nil {
-			t.Fatalf("cas set expect fail, but successful")
+			t.Fatalf("cas %s set expect fail, but successful", testcase.protocol)
 		}
 	}
 }
@@ -132,19 +132,19 @@ func TestReplace(t *testing.T) {
 	for _, testcase := range testcases {
 		key := fmt.Sprintf("test_%s_%s_key", testcase.protocol, testcase.command)
 		value := []byte(fmt.Sprintf("test_%s_%s_value", testcase.protocol, testcase.command))
-		if err := client.Delete(key); err != nil && err != ErrItemNotFound {
+		if err := testcase.client.Delete(key); err != nil && err != ErrItemNotFound {
 			t.Fatalf("test add delete error: %v", err)
 		}
-		if err := client.Replace(&Item{Key: key, Value: value}); err == nil {
+		if err := testcase.client.Replace(&Item{Key: key, Value: value}); err == nil {
 			t.Fatalf("test replace when key not exist must raise error")
 		}
-		if err := client.Set(&Item{Key: key, Value: []byte("test_replace_value")}); err != nil {
+		if err := testcase.client.Set(&Item{Key: key, Value: []byte("test_replace_value")}); err != nil {
 			t.Fatalf("test replace set error: %v", err)
 		}
-		if err := client.Replace(&Item{Key: key, Value: value}); err != nil {
+		if err := testcase.client.Replace(&Item{Key: key, Value: value}); err != nil {
 			t.Fatalf("test replace error: %v", err)
 		}
-		item, err := client.Get(key)
+		item, err := testcase.client.Get(key)
 		if err != nil {
 			t.Fatalf("test replace get error: %v", err)
 		}
@@ -167,13 +167,13 @@ func TestMultiGet(t *testing.T) {
 			key := fmt.Sprintf("test_%s_%s_key_%d", testcase.protocol, testcase.command, i)
 			value := []byte(fmt.Sprintf("test_%s_%s_value_%d", testcase.protocol, testcase.command, i))
 			item := &Item{Key: key, Value: value}
-			if err := client.Set(item); err != nil {
+			if err := testcase.client.Set(item); err != nil {
 				t.Fatalf("set error: %v", err)
 			}
 			keys = append(keys, key)
 			expect[key] = value
 		}
-		result, err := client.MultiGet(keys)
+		result, err := testcase.client.MultiGet(keys)
 		if err != nil {
 			t.Fatalf("get error: %v", err)
 		}
@@ -188,22 +188,65 @@ func TestMultiGet(t *testing.T) {
 	}
 }
 
+func TestMultiGetWithRepeatKeys(t *testing.T) {
+	testcases := []TestCase{
+		{client: client, protocol: "binary", command: "multiGet"},
+		{client: textClient, protocol: "text", command: "multiGet"},
+	}
+	for _, testcase := range testcases {
+		num := 10
+		keys := make([]string, 0, num)
+		expect := make(map[string][]byte, num)
+		for i := 0; i < num; i++ {
+			key := fmt.Sprintf("test_%s_%s_rkey_%d", testcase.protocol, testcase.command, i)
+			value := []byte(fmt.Sprintf("test_%s_%s_rvalue_%d", testcase.protocol, testcase.command, i))
+			item := &Item{Key: key, Value: value}
+			if err := testcase.client.Set(item); err != nil {
+				t.Fatalf("set error: %v", err)
+			}
+			keys = append(keys, key)
+			if i%3 == 0 {
+				keys = append(keys, key)
+			}
+			expect[key] = value
+		}
+		result, err := testcase.client.MultiGet(keys)
+		if err != nil {
+			t.Fatalf("get error: %v", err)
+		}
+		for k, v := range expect {
+			if _, ok := result[k]; !ok {
+				t.Fatalf("MultiGet %s key: %s not exsist", testcase.protocol, k)
+			}
+			if !bytes.Equal(v, result[k].Value) {
+				t.Fatalf("MultiGet %s key: %s expect: %v got: %v", testcase.protocol, k, v, result[k])
+			}
+		}
+	}
+}
+
 func TestDelete(t *testing.T) {
-	key := "test_delete"
-	value := []byte("world")
-	item := &Item{Key: key, Value: value}
-	if err := client.Set(item); err != nil {
-		t.Fatalf("set error: %v", err)
+	testcases := []TestCase{
+		{client: client, protocol: "binary", command: "delete"},
+		{client: textClient, protocol: "text", command: "delete"},
 	}
-	if err := client.Delete(key); err != nil {
-		t.Fatalf("delete error: %v", err)
-	}
-	result, err := client.Get(key)
-	if err != nil {
-		t.Fatalf("get error: %v", err)
-	}
-	if result != nil {
-		t.Fatalf("TestDelete expect result: nil but got: %v", result)
+	for i, testcase := range testcases {
+		key := fmt.Sprintf("test_%s_%s_key_%d", testcase.protocol, testcase.command, i)
+		value := []byte(fmt.Sprintf("test_%s_%s_value_%d", testcase.protocol, testcase.command, i))
+		item := &Item{Key: key, Value: value}
+		if err := testcase.client.Set(item); err != nil {
+			t.Fatalf("set error: %v", err)
+		}
+		if err := testcase.client.Delete(key); err != nil {
+			t.Fatalf("delete error: %v", err)
+		}
+		result, err := testcase.client.Get(key)
+		if err != nil {
+			t.Fatalf("get error: %v", err)
+		}
+		if result != nil {
+			t.Fatalf("TestDelete expect result: nil but got: %v", result)
+		}
 	}
 }
 

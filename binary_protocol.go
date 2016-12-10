@@ -209,14 +209,13 @@ func (protocol BinaryProtocol) setSocketTimeout(timeout time.Duration) {
 }
 
 func (protocol BinaryProtocol) fetch(keys []string) (map[string]*Item, error) {
-	keyCount := len(keys)
-	lastKey := keys[keyCount-1]
+	count := len(keys)
 	buffer := new(bytes.Buffer)
 	for index, key := range keys {
 		op := operations["getkq"]
 		keyLength := len(key)
 		// the last item must be GetK to get a response with key
-		if index == keyCount-1 {
+		if index == count-1 {
 			op = operations["getk"]
 		}
 		hdr.opcode = op.opcode
@@ -235,12 +234,13 @@ func (protocol BinaryProtocol) fetch(keys []string) (map[string]*Item, error) {
 		conn.Close()
 		return nil, err
 	}
-	results := make(map[string]*Item, keyCount)
+	lastKey := keys[count-1]
+	results := make(map[string]*Item, count)
 	for {
 		pkt := new(packet)
 		err = pkt.read(conn)
 		if err != nil && err != ErrItemNotFound {
-			if pkt.status == 0 {
+			if pkt.status != 0 {
 				conn.Close()
 			} else {
 				protocol.pool.Put(conn)
@@ -270,6 +270,9 @@ func (protocol BinaryProtocol) fetch(keys []string) (map[string]*Item, error) {
 
 // Store for store items to the server
 func (protocol BinaryProtocol) store(cmd string, item *Item) error {
+	if cmd == "cas" {
+		cmd = "set"
+	}
 	op, ok := operations[cmd]
 	if !ok {
 		return ErrOperationNotSupported
@@ -309,13 +312,15 @@ func (protocol BinaryProtocol) store(cmd string, item *Item) error {
 		return err
 	}
 	if err = pkt.write(conn); err != nil {
-		return conn.Close()
+		conn.Close()
+		return err
 	}
 	if op.quiet {
-		return protocol.pool.Put(conn)
+		protocol.pool.Put(conn)
+		return err
 	}
 	if err := pkt.read(conn); err != nil {
-		if pkt.status == 0 {
+		if pkt.status != 0 {
 			conn.Close()
 		} else {
 			protocol.pool.Put(conn)
@@ -324,5 +329,6 @@ func (protocol BinaryProtocol) store(cmd string, item *Item) error {
 	}
 	item.Value = pkt.value
 	item.CAS = pkt.cas
-	return protocol.pool.Put(conn)
+	protocol.pool.Put(conn)
+	return nil
 }
