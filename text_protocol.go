@@ -35,8 +35,8 @@ func (protocol TextProtocol) store(cmd string, item *Item) error {
 	if !ok {
 		return ErrOperationNotSupported
 	}
-	isStored := op.command == "set" || op.command == "add" || op.command == "replace" || op.command == "cas"
 	dst := []string{op.command, item.Key}
+	isStored := isStoreOperation(op)
 	if isStored {
 		dst = append(dst, strconv.Itoa(int(item.Flags)))
 		dst = append(dst, strconv.Itoa(int(item.Expiration)))

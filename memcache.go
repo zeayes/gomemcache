@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	defaultMaxIdleConns  = 5
+	defaultMaxIdleConns  = 10
 	defaultIdleTimeout   = 60 * time.Second
 	defaultSocketTimeout = 100 * time.Millisecond
 )
@@ -46,6 +46,7 @@ type Protocol interface {
 type Client struct {
 	server   string
 	protocol Protocol
+	noreply  bool
 }
 
 // NewClient create memcache client
@@ -62,7 +63,7 @@ func NewClient(server string) (*Client, error) {
 	pool.MaxIdleConns = defaultMaxIdleConns
 	pool.IdleTimeout = defaultIdleTimeout
 	pool.SocketTimeout = defaultSocketTimeout
-	return &Client{server: server, protocol: BinaryProtocol{pool: &pool}}, nil
+	return &Client{server: server, protocol: BinaryProtocol{pool: &pool}, noreply: true}, nil
 }
 
 // SetMaxIdleConns set max idle connections
@@ -105,9 +106,19 @@ func (client *Client) SetProtocol(protocol string) error {
 	return nil
 }
 
+// SetNoreply set command noreply option
+// It's avialable for *Set* *Delete*.
+func (client *Client) SetNoreply(noreply bool) {
+	client.noreply = noreply
+}
+
 // Set store this item
 func (client *Client) Set(item *Item) error {
-	return client.protocol.store("set", item)
+	cmd := "setq"
+	if !client.noreply {
+		cmd = "set"
+	}
+	return client.protocol.store(cmd, item)
 }
 
 // Add store this data, but only if the server
@@ -159,5 +170,9 @@ func (client *Client) MultiGet(keys []string) (map[string]*Item, error) {
 
 // Delete explicit deletion of items
 func (client *Client) Delete(key string) error {
-	return client.protocol.store("delete", &Item{Key: key})
+	cmd := "deleteq"
+	if !client.noreply {
+		cmd = "delete"
+	}
+	return client.protocol.store(cmd, &Item{Key: key})
 }

@@ -81,6 +81,10 @@ type operation struct {
 	withKey bool
 }
 
+func isStoreOperation(op operation) bool {
+	return op.command == "set" || op.command == "add" || op.command == "replace" || op.command == "cas"
+}
+
 // Header for request and response
 type header struct {
 	magic        uint8
@@ -181,14 +185,14 @@ func (pkt *packet) read(reader io.Reader) error {
 	if pkt.extrasLength != 0 {
 		pkt.extras = body[:pkt.extrasLength]
 	}
-	if pkt.status != 0 {
-		e, ok := errorMap[pkt.status]
-		if !ok {
-			return fmt.Errorf("server response status code error: %d", pkt.status)
-		}
+	if pkt.status == 0 {
+		return nil
+	}
+	e, ok := errorMap[pkt.status]
+	if ok {
 		return e
 	}
-	return nil
+	return fmt.Errorf("server response status code error: %d", pkt.status)
 }
 
 // BinaryProtocol implements binary protocol
@@ -283,7 +287,7 @@ func (protocol BinaryProtocol) store(cmd string, item *Item) error {
 	hdr.keyLength = uint16(keyLength)
 	hdr.bodyLength = uint32(keyLength)
 	pkt := packet{header: hdr, key: item.Key}
-	if op.command == "set" || op.command == "add" || op.command == "replace" {
+	if isStoreOperation(op) {
 		pkt.value = item.Value
 		pkt.extras = struct {
 			flags      uint32
@@ -291,7 +295,7 @@ func (protocol BinaryProtocol) store(cmd string, item *Item) error {
 		}{flags: item.Flags, expiration: item.Expiration}
 		extrasLength := binary.Size(pkt.extras)
 		pkt.extrasLength = uint8(extrasLength)
-		pkt.bodyLength = uint32(len(item.Key) + len(pkt.value) + extrasLength)
+		pkt.bodyLength = uint32(pkt.keyLength) + uint32(len(pkt.value)) + uint32(extrasLength)
 	}
 	if op.command == "incr" || op.command == "decr" {
 		delta, err := strconv.ParseUint(string(item.Value), 10, 64)
@@ -305,7 +309,7 @@ func (protocol BinaryProtocol) store(cmd string, item *Item) error {
 		}{delta: delta, initial: 0, expiration: item.Expiration}
 		extrasLength := binary.Size(pkt.extras)
 		pkt.extrasLength = uint8(extrasLength)
-		pkt.bodyLength = uint32(len(item.Key) + extrasLength)
+		pkt.bodyLength = uint32(pkt.keyLength) + uint32(extrasLength)
 	}
 	conn, err := protocol.pool.Get()
 	if err != nil {
