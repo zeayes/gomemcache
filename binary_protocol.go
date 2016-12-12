@@ -20,8 +20,6 @@ const (
 
 var (
 	hdrSize = binary.Size(header{})
-	hdrBuf  = make([]byte, hdrSize)
-	hdr     = header{magic: requestMagic}
 
 	errorMap = map[uint16]error{
 		0x001: ErrItemNotFound,
@@ -99,6 +97,7 @@ type header struct {
 }
 
 func (hdr *header) read(reader io.Reader) error {
+	hdrBuf := make([]byte, hdrSize)
 	if n, err := io.ReadFull(reader, hdrBuf); err != nil || n != hdrSize {
 		return err
 	}
@@ -114,53 +113,36 @@ func (hdr *header) read(reader io.Reader) error {
 	return nil
 }
 
-func (hdr *header) write(writer io.Writer) error {
-	hdrBuf[0] = hdr.magic
-	hdrBuf[1] = hdr.opcode
-	binary.BigEndian.PutUint16(hdrBuf[2:4], hdr.keyLength)
-	hdrBuf[4] = hdr.extrasLength
-	hdrBuf[5] = hdr.dataType
-	binary.BigEndian.PutUint16(hdrBuf[6:8], hdr.status)
-	binary.BigEndian.PutUint32(hdrBuf[8:12], hdr.bodyLength)
-	binary.BigEndian.PutUint32(hdrBuf[12:16], hdr.opaque)
-	binary.BigEndian.PutUint64(hdrBuf[16:24], hdr.cas)
-	if n, err := writer.Write(hdrBuf); err != nil || n != hdrSize {
-		return err
-	}
-	return nil
+func (hdr *header) write(buf []byte) {
+	buf[0] = hdr.magic
+	buf[1] = hdr.opcode
+	binary.BigEndian.PutUint16(buf[2:4], hdr.keyLength)
+	buf[4] = hdr.extrasLength
+	buf[5] = hdr.dataType
+	binary.BigEndian.PutUint16(buf[6:8], hdr.status)
+	binary.BigEndian.PutUint32(buf[8:12], hdr.bodyLength)
+	binary.BigEndian.PutUint32(buf[12:16], hdr.opaque)
+	binary.BigEndian.PutUint64(buf[16:24], hdr.cas)
 }
 
 // Packet for request and response
 type packet struct {
 	header
-	extras interface{}
+	extras []byte
 	key    string
 	value  []byte
 }
 
 func (pkt *packet) write(writer io.Writer) error {
-	buf := make([]byte, 0, uint32(hdrSize)+pkt.bodyLength)
-	buffer := bytes.NewBuffer(buf)
+	buf := make([]byte, hdrSize, uint32(hdrSize)+pkt.bodyLength)
 	// if err := binary.Write(buffer, binary.BigEndian, pkt.header); err != nil {
 	// return err
 	// }
-	if err := pkt.header.write(buffer); err != nil {
-		return err
-	}
-	if pkt.extrasLength != 0 {
-		if err := binary.Write(buffer, binary.BigEndian, pkt.extras); err != nil {
-			return err
-		}
-	}
-	if _, err := buffer.Write([]byte(pkt.key)); err != nil {
-		return err
-	}
-	if pkt.value != nil {
-		if _, err := buffer.Write(pkt.value); err != nil {
-			return err
-		}
-	}
-	_, err := buffer.WriteTo(writer)
+	pkt.header.write(buf)
+	buf = append(buf, pkt.extras...)
+	buf = append(buf, pkt.key...)
+	buf = append(buf, pkt.value...)
+	_, err := writer.Write(buf)
 	return err
 }
 
@@ -222,10 +204,13 @@ func (protocol BinaryProtocol) fetch(keys []string) (map[string]*Item, error) {
 		if index == count-1 {
 			op = operations["getk"]
 		}
-		hdr.opcode = op.opcode
-		hdr.keyLength = uint16(keyLength)
-		hdr.bodyLength = uint32(keyLength)
-		pkt := packet{header: hdr, key: key}
+		pkt := &packet{
+			header: header{
+				magic:      requestMagic,
+				opcode:     op.opcode,
+				keyLength:  uint16(keyLength),
+				bodyLength: uint32(keyLength),
+			}, key: key}
 		if err := pkt.write(buffer); err != nil {
 			return nil, err
 		}
@@ -258,7 +243,7 @@ func (protocol BinaryProtocol) fetch(keys []string) (map[string]*Item, error) {
 		if pkt.value != nil {
 			var flags uint32
 			if pkt.extras != nil {
-				flags = binary.BigEndian.Uint32(pkt.extras.([]byte))
+				flags = binary.BigEndian.Uint32(pkt.extras)
 			}
 			results[pkt.key] = &Item{Key: pkt.key, Value: pkt.value, Flags: flags, CAS: pkt.cas}
 		}
@@ -282,18 +267,20 @@ func (protocol BinaryProtocol) store(cmd string, item *Item) error {
 		return ErrOperationNotSupported
 	}
 	keyLength := len(item.Key)
-	hdr.cas = item.CAS
-	hdr.opcode = op.opcode
-	hdr.keyLength = uint16(keyLength)
-	hdr.bodyLength = uint32(keyLength)
-	pkt := packet{header: hdr, key: item.Key}
+	pkt := &packet{
+		header: header{
+			magic:      requestMagic,
+			opcode:     op.opcode,
+			keyLength:  uint16(keyLength),
+			cas:        item.CAS,
+			bodyLength: uint32(keyLength),
+		}, key: item.Key}
 	if isStoreOperation(op) {
 		pkt.value = item.Value
-		pkt.extras = struct {
-			flags      uint32
-			expiration uint32
-		}{flags: item.Flags, expiration: item.Expiration}
-		extrasLength := binary.Size(pkt.extras)
+		extrasLength := 8
+		pkt.extras = make([]byte, extrasLength)
+		binary.BigEndian.PutUint32(pkt.extras[:4], item.Flags)
+		binary.BigEndian.PutUint32(pkt.extras[4:], item.Expiration)
 		pkt.extrasLength = uint8(extrasLength)
 		pkt.bodyLength = uint32(pkt.keyLength) + uint32(len(pkt.value)) + uint32(extrasLength)
 	}
@@ -302,12 +289,11 @@ func (protocol BinaryProtocol) store(cmd string, item *Item) error {
 		if err != nil {
 			return errors.New("invalid arguments")
 		}
-		pkt.extras = struct {
-			delta      uint64
-			initial    uint64
-			expiration uint32
-		}{delta: delta, initial: 0, expiration: item.Expiration}
-		extrasLength := binary.Size(pkt.extras)
+		extrasLength := 20
+		pkt.extras = make([]byte, extrasLength)
+		binary.BigEndian.PutUint64(pkt.extras[:8], delta)
+		binary.BigEndian.PutUint64(pkt.extras[8:16], 0)
+		binary.BigEndian.PutUint32(pkt.extras[16:], item.Expiration)
 		pkt.extrasLength = uint8(extrasLength)
 		pkt.bodyLength = uint32(pkt.keyLength) + uint32(extrasLength)
 	}

@@ -16,11 +16,11 @@ func init() {
 	if err != nil {
 		os.Exit(1)
 	}
+	client.SetProtocol("binary")
 	textClient, err = NewClient("127.0.0.1:11211")
 	if err != nil {
 		os.Exit(1)
 	}
-	textClient.SetProtocol("text")
 }
 
 type TestCase struct {
@@ -67,7 +67,7 @@ func TestGet(t *testing.T) {
 		if flags != result.Flags {
 			t.Fatalf("client %s TestGet flags expect: %v but got: %v", testcase.protocol, flags, result.Flags)
 		}
-		time.Sleep(time.Duration(expiration) * time.Second)
+		time.Sleep(time.Duration(expiration+1) * time.Second)
 		result, err = testcase.client.Get(key)
 		if err != nil {
 			t.Fatalf("client %s get error: %v", testcase.protocol, err)

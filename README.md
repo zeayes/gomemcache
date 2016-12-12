@@ -30,8 +30,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("init client error: %v", err)
 	}
-	// set client protocol "text" or "binary", default is "binary"
-	// client.SetProtocol("text")
+	// set client protocol "text" or "binary", default is "text"
+	// client.SetProtocol("binary")
 	item := &gomemcache.Item{Key: "test1", Flags: 9, Expiration: 5, Value: []byte("replace_value")}
 	if err = client.Set(item); err != nil {
 		log.Fatalf("Set error: %v", err)
@@ -51,17 +51,17 @@ func main() {
 
 Benchmark
 ===========
-benchmark on MBP(Mid 2015 2.2 GHz 16GB)
+benchmark on MBP(Mid 2015 2.2 GHz 16GB), and memcached served by default options.
 ```
-BenchmarkBinarySet-8        	   50000	     32946 ns/op	     352 B/op	      12 allocs/op
-BenchmarkBinaryGet-8        	   50000	     31112 ns/op	     736 B/op	      11 allocs/op
-BenchmarkBinaryMultiGet-8   	   20000	     77315 ns/op	    5124 B/op	      67 allocs/op
-BenchmarkTextSet-8          	   50000	     32659 ns/op	     480 B/op	      11 allocs/op
-BenchmarkTextGet-8          	   50000	     38557 ns/op	    6915 B/op	      19 allocs/op
-BenchmarkTextMultiGet-8     	   20000	     85421 ns/op	   28128 B/op	     129 allocs/op
+BenchmarkBinarySet-8        	  200000	      6809 ns/op	     184 B/op	       4 allocs/op
+BenchmarkBinaryGet-8        	   50000	     30583 ns/op	     624 B/op	      10 allocs/op
+BenchmarkBinaryMultiGet-8   	   20000	     76415 ns/op	    4004 B/op	      57 allocs/op
+BenchmarkTextSet-8          	  200000	      6295 ns/op	     160 B/op	       7 allocs/op
+BenchmarkTextGet-8          	   50000	     32537 ns/op	    4624 B/op	       9 allocs/op
+BenchmarkTextMultiGet-8     	   30000	     42676 ns/op	    6516 B/op	      35 allocs/op
 ```
 
 License
 ===========
 
-gomemcache is released under the MIT License. See LICENSE for more information.
+gomemcache is released under the MIT License.

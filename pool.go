@@ -40,7 +40,17 @@ type idleConn struct {
 func (pool *Pool) Get() (Conn, error) {
 	pool.mu.Lock()
 	defer pool.mu.Unlock()
-	numIdle := len(pool.idleConns)
+	idleConns := pool.idleConns[:0]
+	expiredSince := nowFunc().Add(-pool.IdleTimeout)
+	for _, ic := range pool.idleConns {
+		if ic.idleAt.Before(expiredSince) {
+			if err := ic.conn.Close(); err != nil {
+				return nil, err
+			}
+		}
+		idleConns = append(idleConns, ic)
+	}
+	numIdle := len(idleConns)
 	if numIdle == 0 {
 		if pool.closed {
 			return nil, errPoolClosed
@@ -51,26 +61,11 @@ func (pool *Pool) Get() (Conn, error) {
 		}
 		return c, nil
 	}
-	expiredSince := nowFunc().Add(-pool.IdleTimeout)
-	for index, ic := range pool.idleConns {
-		if ic.idleAt.Before(expiredSince) {
-			if err := ic.conn.Close(); err != nil {
-				return nil, err
-			}
-			last := len(pool.idleConns) - 1
-			pool.idleConns[index] = pool.idleConns[last-1]
-			pool.idleConns[last] = nil
-			pool.idleConns = pool.idleConns[:last]
-			index--
-		}
-	}
 	if numIdle >= pool.MaxIdleConns {
 		return nil, ErrPoolExhausted
 	}
-	ic := pool.idleConns[0]
-	copy(pool.idleConns, pool.idleConns[1:])
-	pool.idleConns = pool.idleConns[:numIdle-1]
-	return ic.conn, nil
+	pool.idleConns = idleConns[:numIdle-1]
+	return idleConns[0].conn, nil
 }
 
 // Put put an idle conn into idle conns

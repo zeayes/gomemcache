@@ -63,7 +63,7 @@ func NewClient(server string) (*Client, error) {
 	pool.MaxIdleConns = defaultMaxIdleConns
 	pool.IdleTimeout = defaultIdleTimeout
 	pool.SocketTimeout = defaultSocketTimeout
-	return &Client{server: server, protocol: BinaryProtocol{pool: &pool}, noreply: true}, nil
+	return &Client{server: server, protocol: TextProtocol{pool: &pool}, noreply: true}, nil
 }
 
 // SetMaxIdleConns set max idle connections
@@ -153,7 +153,7 @@ func (client *Client) Get(key string) (*Item, error) {
 
 // MultiGet retrieve bulk items with some keys
 func (client *Client) MultiGet(keys []string) (map[string]*Item, error) {
-	ks := make([]string, 0, len(keys))
+	ks := keys[:0]
 	for _, key := range keys {
 		exists := false
 		for _, k := range ks {
