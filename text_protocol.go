@@ -6,10 +6,13 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 	"time"
 )
+
+const defaultItemValueSize = 1024
 
 type TextProtocol struct {
 	pool *Pool
@@ -62,6 +65,9 @@ func (protocol TextProtocol) store(cmd string, item *Item) error {
 		buf = append(buf, "\r\n"...)
 	}
 	conn, err := protocol.pool.Get()
+	if err != nil {
+		return err
+	}
 	if _, err = conn.Write(buf); err != nil {
 		conn.Close()
 		return err
@@ -119,40 +125,55 @@ func (protocol TextProtocol) fetch(keys []string) (map[string]*Item, error) {
 	}
 	buf = append(buf, "\r\n"...)
 	conn, err := protocol.pool.Get()
+	if err != nil {
+		return nil, err
+	}
 	_, err = conn.Write(buf)
 	if err != nil {
 		conn.Close()
 		return nil, err
 	}
 	result := make(map[string]*Item, len(keys))
-	scanner := bufio.NewScanner(conn)
-	for scanner.Scan() {
-		text := scanner.Text()
-		if text == "END" {
-			break
+	reader := bufio.NewReader(conn)
+	for {
+		line, err := reader.ReadSlice('\n')
+		if err != nil {
+			conn.Close()
+			return nil, err
 		}
-		values := strings.Split(scanner.Text(), " ")
-		if len(values) >= 4 {
-			scanner.Scan()
-			flags, err := strconv.ParseUint(values[2], 10, 32)
-			if err != nil {
+		if bytes.Equal(line, []byte("END\r\n")) {
+			protocol.pool.Put(conn)
+			return result, nil
+		}
+		values := strings.Split(string(line[6:len(line)-2]), " ")
+		length := len(values)
+		if length != 3 && length != 4 {
+			return nil, ErrInvalidResponseFormat
+		}
+		flags, err := strconv.ParseUint(values[1], 10, 32)
+		if err != nil {
+			conn.Close()
+			return nil, err
+		}
+		size, err := strconv.ParseUint(values[2], 10, 32)
+		if err != nil {
+			conn.Close()
+			return nil, err
+		}
+		value := make([]byte, size+2)
+		// include the delimiter \r\n
+		n, err := io.ReadFull(reader, value)
+		if err != nil || uint64(n) != size+2 {
+			conn.Close()
+			return nil, err
+		}
+		item := &Item{Key: values[0], Value: value[:size], Flags: uint32(flags)}
+		if length == 4 {
+			if item.CAS, err = strconv.ParseUint(values[3], 10, 64); err != nil {
 				conn.Close()
 				return nil, err
 			}
-			item := &Item{Key: values[1], Value: scanner.Bytes(), Flags: uint32(flags)}
-			if len(values) == 5 {
-				if item.CAS, err = strconv.ParseUint(values[4], 10, 64); err != nil {
-					conn.Close()
-					return nil, err
-				}
-			}
-			result[item.Key] = item
 		}
+		result[item.Key] = item
 	}
-	if err := scanner.Err(); err != nil {
-		conn.Close()
-		return nil, err
-	}
-	protocol.pool.Put(conn)
-	return result, nil
 }

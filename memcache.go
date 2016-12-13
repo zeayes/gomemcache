@@ -22,6 +22,10 @@ var (
 	ErrItemNotStored = errors.New("item is not stored")
 	// ErrOperationNotSupported indicates that you send an unkonwn command
 	ErrOperationNotSupported = errors.New("operation is not supported")
+	// ErrInvalidResponseFormat suggests that the response can't be parsed.
+	ErrInvalidResponseFormat = errors.New("The server repsonse error value format")
+	// ErrInvalidKey indicates the key is invalid.
+	ErrInvalidKey = errors.New("invalid key, key must be less than 250 and can't contain black or control character")
 )
 
 // Item item stored in memcache server
@@ -47,6 +51,20 @@ type Client struct {
 	server   string
 	protocol Protocol
 	noreply  bool
+}
+
+func invalidKey(key string) bool {
+	// key must be less than 250 and can't contain black and control character
+	length := len(key)
+	if length > 250 {
+		return false
+	}
+	for i := 0; i < length; i++ {
+		if key[i] <= ' ' || key[i] > 0x7f {
+			return false
+		}
+	}
+	return true
 }
 
 // NewClient create memcache client
@@ -114,6 +132,9 @@ func (client *Client) SetNoreply(noreply bool) {
 
 // Set store this item
 func (client *Client) Set(item *Item) error {
+	if !invalidKey(item.Key) {
+		return ErrInvalidKey
+	}
 	cmd := "setq"
 	if !client.noreply {
 		cmd = "set"
@@ -124,23 +145,35 @@ func (client *Client) Set(item *Item) error {
 // Add store this data, but only if the server
 // *doesn't* already hold data for this key
 func (client *Client) Add(item *Item) error {
+	if !invalidKey(item.Key) {
+		return ErrInvalidKey
+	}
 	return client.protocol.store("add", item)
 }
 
 // CAS store this item but only if no one
 // else has updated since I last fetched it
 func (client *Client) CAS(item *Item) error {
+	if !invalidKey(item.Key) {
+		return ErrInvalidKey
+	}
 	return client.protocol.store("cas", item)
 }
 
 // Replace store this data, but only if the
 // server *does* already hold data for this key
 func (client *Client) Replace(item *Item) error {
+	if !invalidKey(item.Key) {
+		return ErrInvalidKey
+	}
 	return client.protocol.store("replace", item)
 }
 
 // Get retrieve an item from the server with a key.
 func (client *Client) Get(key string) (*Item, error) {
+	if !invalidKey(key) {
+		return nil, ErrInvalidKey
+	}
 	items, err := client.protocol.fetch([]string{key})
 	if err != nil {
 		return nil, err
@@ -162,6 +195,9 @@ func (client *Client) MultiGet(keys []string) (map[string]*Item, error) {
 			}
 		}
 		if !exists {
+			if !invalidKey(key) {
+				return nil, ErrInvalidKey
+			}
 			ks = append(ks, key)
 		}
 	}
@@ -170,6 +206,9 @@ func (client *Client) MultiGet(keys []string) (map[string]*Item, error) {
 
 // Delete explicit deletion of items
 func (client *Client) Delete(key string) error {
+	if !invalidKey(key) {
+		return ErrInvalidKey
+	}
 	cmd := "deleteq"
 	if !client.noreply {
 		cmd = "delete"

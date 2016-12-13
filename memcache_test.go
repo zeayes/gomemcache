@@ -61,6 +61,9 @@ func TestGet(t *testing.T) {
 		if err != nil {
 			t.Fatalf("client %s get error: %v", testcase.protocol, err)
 		}
+		if result == nil {
+			t.Fatalf("client %s TestGet value expect: %v but got nil", testcase.protocol, string(value))
+		}
 		if !bytes.Equal(value, result.Value) {
 			t.Fatalf("client %s TestGet value expect: %v but got: %v", testcase.protocol, string(value), string(result.Value))
 		}
