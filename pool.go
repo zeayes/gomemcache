@@ -47,11 +47,16 @@ func (pool *Pool) Get() (Conn, error) {
 			if err := ic.conn.Close(); err != nil {
 				return nil, err
 			}
+		} else {
+			idleConns = append(idleConns, ic)
 		}
-		idleConns = append(idleConns, ic)
 	}
 	numIdle := len(idleConns)
+	if numIdle >= pool.MaxIdleConns {
+		return nil, ErrPoolExhausted
+	}
 	if numIdle == 0 {
+		pool.idleConns = idleConns
 		if pool.closed {
 			return nil, errPoolClosed
 		}
@@ -61,11 +66,8 @@ func (pool *Pool) Get() (Conn, error) {
 		}
 		return c, nil
 	}
-	if numIdle >= pool.MaxIdleConns {
-		return nil, ErrPoolExhausted
-	}
 	pool.idleConns = idleConns[:numIdle-1]
-	return idleConns[0].conn, nil
+	return idleConns[numIdle-1].conn, nil
 }
 
 // Put put an idle conn into idle conns
