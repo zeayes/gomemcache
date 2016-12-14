@@ -254,10 +254,9 @@ func TestDelete(t *testing.T) {
 }
 
 func BenchmarkBinarySet(b *testing.B) {
-	key := "bench_binary_set"
-	value := []byte("world")
+	item := &Item{Key: "bench_binary_set", Value: []byte("world")}
+	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		item := &Item{Key: key, Value: value}
 		if err := client.Set(item); err != nil {
 			b.Fatalf("set error: %v", err)
 		}
@@ -272,6 +271,7 @@ func BenchmarkBinaryGet(b *testing.B) {
 		b.Fatalf("set error: %v", err)
 	}
 	b.ResetTimer()
+	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		result, err := client.Get(key)
 		if err != nil {
@@ -295,6 +295,7 @@ func BenchmarkBinaryMultiGet(b *testing.B) {
 		keys = append(keys, key)
 	}
 	b.ResetTimer()
+	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		_, err := client.MultiGet(keys)
 		if err != nil {
@@ -305,6 +306,7 @@ func BenchmarkBinaryMultiGet(b *testing.B) {
 
 func BenchmarkTextSet(b *testing.B) {
 	item := &Item{Key: "bench_text_set", Value: []byte("world")}
+	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		if err := textClient.Set(item); err != nil {
 			b.Fatalf("set error: %v", err)
@@ -320,6 +322,7 @@ func BenchmarkTextGet(b *testing.B) {
 		b.Fatalf("set error: %v", err)
 	}
 	b.ResetTimer()
+	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		result, err := textClient.Get(key)
 		if err != nil {
@@ -343,6 +346,7 @@ func BenchmarkTextMultiGet(b *testing.B) {
 		keys = append(keys, key)
 	}
 	b.ResetTimer()
+	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		_, err := textClient.MultiGet(keys)
 		if err != nil {
