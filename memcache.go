@@ -201,6 +201,9 @@ func (client *Client) MultiGet(keys []string) (map[string]*Item, error) {
 			ks = append(ks, key)
 		}
 	}
+	if len(ks) == 0 {
+		return nil, nil
+	}
 	return client.protocol.fetch(ks)
 }
 
