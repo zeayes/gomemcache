@@ -1,5 +1,6 @@
 gomemcache
 ===========
+[![Build Status](https://travis-ci.org/zeayes/gomemcache.svg?branch=master)](https://travis-ci.org/zeayes/gomemcache)
 
 A memcached client supported binary and text protocol implements by golang.
 

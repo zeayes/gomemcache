@@ -89,6 +89,7 @@ func TestAdd(t *testing.T) {
 	for _, testcase := range testcases {
 		key := fmt.Sprintf("test_%s_%s_key", testcase.protocol, testcase.command)
 		value := []byte(fmt.Sprintf("test_%s_%s_value", testcase.protocol, testcase.command))
+		client.SetNoreply(false)
 		if err := testcase.client.Delete(key); err != nil && err != ErrItemNotFound {
 			t.Fatalf("test %s add delete error: %v", testcase.protocol, err)
 		}
