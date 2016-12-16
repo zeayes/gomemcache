@@ -1,0 +1,11 @@
+language: go
+
+services:
+    - memcached
+
+go:
+    - 1.6
+    - 1.7.x
+
+install:
+    - go get -u github.com/zeayes/gomemcache
