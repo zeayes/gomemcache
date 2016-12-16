@@ -119,12 +119,11 @@ func (protocol TextProtocol) fetch(keys []string) (map[string]*Item, error) {
 	for i := 0; i < count; i++ {
 		length += len(keys[i])
 	}
-	buf := make([]byte, 0, length+7)
-	buf = append(buf, "gets "...)
-	buf = append(buf, keys[0]...)
-	for i := 1; i < count; i++ {
+	buf := make([]byte, 0, length+6)
+	buf = append(buf, "gets"...)
+	for _, key := range keys {
 		buf = append(buf, ' ')
-		buf = append(buf, keys[i]...)
+		buf = append(buf, key...)
 	}
 	buf = append(buf, "\r\n"...)
 	conn, err := protocol.pool.Get()
