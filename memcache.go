@@ -43,7 +43,7 @@ type Protocol interface {
 	setIdleTimeout(timeout time.Duration)
 	setSocketTimeout(timeout time.Duration)
 	store(command string, item *Item) error
-	fetch(keys []string) (map[string]*Item, error)
+	fetch(keys []string, withCAS bool) (map[string]*Item, error)
 }
 
 // Client memcache client for writing and reading
@@ -169,12 +169,27 @@ func (client *Client) Replace(item *Item) error {
 	return client.protocol.store("replace", item)
 }
 
+// Gets retrieve an item from the server with a key, Item responses with CAS
+func (client *Client) Gets(key string) (*Item, error) {
+	if !invalidKey(key) {
+		return nil, ErrInvalidKey
+	}
+	items, err := client.protocol.fetch([]string{key}, true)
+	if err != nil {
+		return nil, err
+	}
+	if item, ok := items[key]; ok {
+		return item, nil
+	}
+	return nil, nil
+}
+
 // Get retrieve an item from the server with a key.
 func (client *Client) Get(key string) (*Item, error) {
 	if !invalidKey(key) {
 		return nil, ErrInvalidKey
 	}
-	items, err := client.protocol.fetch([]string{key})
+	items, err := client.protocol.fetch([]string{key}, false)
 	if err != nil {
 		return nil, err
 	}
@@ -204,7 +219,7 @@ func (client *Client) MultiGet(keys []string) (map[string]*Item, error) {
 	if len(ks) == 0 {
 		return nil, nil
 	}
-	return client.protocol.fetch(ks)
+	return client.protocol.fetch(ks, false)
 }
 
 // Delete explicit deletion of items

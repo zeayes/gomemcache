@@ -113,19 +113,26 @@ func (protocol TextProtocol) checkError(buf []byte, err error) error {
 	return fmt.Errorf("server response error %s doesn't define", string(buf))
 }
 
-func (protocol TextProtocol) fetch(keys []string) (map[string]*Item, error) {
+func (protocol TextProtocol) fetch(keys []string, withCAS bool) (map[string]*Item, error) {
+	var cmd []byte
+	if withCAS {
+		cmd = []byte("gets")
+	} else {
+		cmd = []byte("get")
+	}
 	count := len(keys)
-	length := count
+	length := count + len(cmd)
 	for i := 0; i < count; i++ {
 		length += len(keys[i])
 	}
-	buf := make([]byte, 0, length+6)
-	buf = append(buf, "gets"...)
+	buf := make([]byte, 0, length+2)
+	buf = append(buf, cmd...)
 	for _, key := range keys {
 		buf = append(buf, ' ')
-		buf = append(buf, key...)
+		buf = append(buf, []byte(key)...)
 	}
-	buf = append(buf, "\r\n"...)
+	buf = append(buf, '\r')
+	buf = append(buf, '\n')
 	conn, err := protocol.pool.Get()
 	if err != nil {
 		return nil, err
@@ -148,8 +155,8 @@ func (protocol TextProtocol) fetch(keys []string) (map[string]*Item, error) {
 			return result, nil
 		}
 		values := strings.Split(string(line[6:len(line)-2]), " ")
-		length := len(values)
-		if length != 3 && length != 4 {
+		num := len(values)
+		if num != 3 && num != 4 {
 			return nil, ErrInvalidResponseFormat
 		}
 		flags, err := strconv.ParseUint(values[1], 10, 32)
@@ -170,7 +177,7 @@ func (protocol TextProtocol) fetch(keys []string) (map[string]*Item, error) {
 			return nil, err
 		}
 		item := &Item{Key: values[0], Value: value[:size], Flags: uint32(flags)}
-		if length == 4 {
+		if num == 4 {
 			if item.CAS, err = strconv.ParseUint(values[3], 10, 64); err != nil {
 				conn.Close()
 				return nil, err

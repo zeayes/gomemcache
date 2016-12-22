@@ -49,11 +49,35 @@ func TestGet(t *testing.T) {
 		{client: textClient, protocol: "text", command: "get"},
 	}
 	for _, testcase := range testcases {
-		flags := uint32(1000)
-		expiration := 1
 		key := fmt.Sprintf("test_%s_%s_key", testcase.protocol, testcase.command)
 		value := []byte(fmt.Sprintf("test_%s_%s_value", testcase.protocol, testcase.command))
-		item := &Item{Key: key, Value: value, Flags: flags, Expiration: uint32(expiration)}
+		item := &Item{Key: key, Value: value}
+		if err := testcase.client.Set(item); err != nil {
+			t.Fatalf("client %s set error: %v", testcase.protocol, err)
+		}
+		result, err := testcase.client.Get(key)
+		if err != nil {
+			t.Fatalf("client %s get error: %v", testcase.protocol, err)
+		}
+		if result == nil {
+			t.Fatalf("client %s TestGet value expect: %v but got nil", testcase.protocol, string(value))
+		}
+		if !bytes.Equal(value, result.Value) {
+			t.Fatalf("client %s TestGet value expect: %v but got: %v", testcase.protocol, string(value), string(result.Value))
+		}
+	}
+}
+
+func TestGetFlagItem(t *testing.T) {
+	testcases := []TestCase{
+		{client: client, protocol: "binary", command: "get_flag_item"},
+		{client: textClient, protocol: "text", command: "get_flag_item"},
+	}
+	for _, testcase := range testcases {
+		flags := uint32(1000)
+		key := fmt.Sprintf("test_%s_%s_key", testcase.protocol, testcase.command)
+		value := []byte(fmt.Sprintf("test_%s_%s_value", testcase.protocol, testcase.command))
+		item := &Item{Key: key, Value: value, Flags: flags}
 		if err := testcase.client.Set(item); err != nil {
 			t.Fatalf("client %s set error: %v", testcase.protocol, err)
 		}
@@ -70,6 +94,29 @@ func TestGet(t *testing.T) {
 		if flags != result.Flags {
 			t.Fatalf("client %s TestGet flags expect: %v but got: %v", testcase.protocol, flags, result.Flags)
 		}
+	}
+}
+
+func TestGetExpireItem(t *testing.T) {
+	testcases := []TestCase{
+		{client: client, protocol: "binary", command: "get_expire_item"},
+		{client: textClient, protocol: "text", command: "get_expire_item"},
+	}
+	for _, testcase := range testcases {
+		expiration := 1
+		key := fmt.Sprintf("test_%s_%s_key", testcase.protocol, testcase.command)
+		value := []byte(fmt.Sprintf("test_%s_%s_value", testcase.protocol, testcase.command))
+		item := &Item{Key: key, Value: value, Expiration: uint32(expiration)}
+		if err := testcase.client.Set(item); err != nil {
+			t.Fatalf("client %s set error: %v", testcase.protocol, err)
+		}
+		result, err := testcase.client.Get(key)
+		if err != nil {
+			t.Fatalf("client %s get error: %v", testcase.protocol, err)
+		}
+		if result == nil {
+			t.Fatalf("client %s TestGet value expect: %v but got nil", testcase.protocol, string(value))
+		}
 		time.Sleep(time.Duration(expiration+1) * time.Second)
 		result, err = testcase.client.Get(key)
 		if err != nil {
@@ -77,6 +124,38 @@ func TestGet(t *testing.T) {
 		}
 		if result != nil {
 			t.Fatalf("client %s get expired item got: %v", testcase.protocol, result)
+		}
+	}
+}
+
+func TestGets(t *testing.T) {
+	testcases := []TestCase{
+		{client: client, protocol: "binary", command: "gets"},
+		{client: textClient, protocol: "text", command: "gets"},
+	}
+	for _, testcase := range testcases {
+		flags := uint32(1000)
+		key := fmt.Sprintf("test_%s_%s_key", testcase.protocol, testcase.command)
+		value := []byte(fmt.Sprintf("test_%s_%s_value", testcase.protocol, testcase.command))
+		item := &Item{Key: key, Value: value, Flags: flags}
+		if err := testcase.client.Set(item); err != nil {
+			t.Fatalf("client %s set error: %v", testcase.protocol, err)
+		}
+		result, err := testcase.client.Gets(key)
+		if err != nil {
+			t.Fatalf("client %s get error: %v", testcase.protocol, err)
+		}
+		if result == nil {
+			t.Fatalf("client %s TestGets value expect: %v but got nil", testcase.protocol, string(value))
+		}
+		if !bytes.Equal(value, result.Value) {
+			t.Fatalf("client %s TestGets value expect: %v but got: %v", testcase.protocol, string(value), string(result.Value))
+		}
+		if flags != result.Flags {
+			t.Fatalf("client %s TestGets flags expect: %v but got: %v", testcase.protocol, flags, result.Flags)
+		}
+		if result.CAS == 0 {
+			t.Fatalf("client %s TestGets CAS shouldn't got: 0", testcase.protocol)
 		}
 	}
 }

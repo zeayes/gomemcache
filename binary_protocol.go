@@ -194,7 +194,7 @@ func (protocol BinaryProtocol) setSocketTimeout(timeout time.Duration) {
 	protocol.pool.SocketTimeout = timeout
 }
 
-func (protocol BinaryProtocol) fetch(keys []string) (map[string]*Item, error) {
+func (protocol BinaryProtocol) fetch(keys []string, withCAS bool) (map[string]*Item, error) {
 	count := len(keys)
 	buffer := new(bytes.Buffer)
 	for index, key := range keys {
