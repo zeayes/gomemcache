@@ -32,12 +32,12 @@ type Pool struct {
 
 // Conn net connection with idle timeout
 type idleConn struct {
-	conn   Conn
+	Conn
 	idleAt time.Time
 }
 
 // Get get a connection from idle conns
-func (pool *Pool) Get() (Conn, error) {
+func (pool *Pool) Get() (*idleConn, error) {
 	pool.mu.Lock()
 	defer pool.mu.Unlock()
 	if pool.closed {
@@ -52,29 +52,32 @@ func (pool *Pool) Get() (Conn, error) {
 			break
 		}
 		// close expired connection
-		if err := ic.conn.Close(); err != nil {
+		if err := ic.Close(); err != nil {
 			return nil, err
 		}
 	}
 	pool.idleConns = pool.idleConns[index:]
 	numIdle := len(pool.idleConns)
 	if numIdle == 0 {
-		return pool.DialFunc()
+		c, err := pool.DialFunc()
+		if err != nil {
+			return nil, err
+		}
+		return &idleConn{c, nowFunc()}, nil
 	}
 	conn := pool.idleConns[numIdle-1]
 	pool.idleConns = pool.idleConns[:numIdle-1]
-	return conn.conn, nil
+	return conn, nil
 }
 
 // Put put an idle conn into idle conns
-func (pool *Pool) Put(c Conn) error {
+func (pool *Pool) Put(ic *idleConn) error {
 	pool.mu.Lock()
 	defer pool.mu.Unlock()
 	if pool.closed || len(pool.idleConns) >= pool.MaxIdleConns {
-		return c.Close()
+		return ic.Close()
 	}
-	ic := idleConn{conn: c, idleAt: nowFunc()}
-	pool.idleConns = append(pool.idleConns, &ic)
+	pool.idleConns = append(pool.idleConns, ic)
 	return nil
 }
 
@@ -86,7 +89,7 @@ func (pool *Pool) Close() error {
 		return nil
 	}
 	for _, ic := range pool.idleConns {
-		if err := ic.conn.Close(); err != nil {
+		if err := ic.Close(); err != nil {
 			return err
 		}
 	}
