@@ -8,9 +8,10 @@ import (
 )
 
 const (
-	defaultMaxIdleConns  = 10
-	defaultIdleTimeout   = 60 * time.Second
-	defaultSocketTimeout = 100 * time.Millisecond
+	defaultMaxIdleConns   = 10
+	defaultMaxActiveConns = 20
+	defaultIdleTimeout    = 60 * time.Second
+	defaultSocketTimeout  = 100 * time.Millisecond
 )
 
 var (
@@ -40,6 +41,7 @@ type Item struct {
 // Protocol (binary or text) supported by memcached should implements interface
 type Protocol interface {
 	setMaxIdleConns(maxIdleConns int)
+	setMaxActiveConns(maxActiveConns int)
 	setIdleTimeout(timeout time.Duration)
 	setSocketTimeout(timeout time.Duration)
 	store(command string, item *Item) error
@@ -69,24 +71,18 @@ func invalidKey(key string) bool {
 
 // NewClient create memcache client
 func NewClient(server string) (*Client, error) {
-	pool := Pool{
-		DialFunc: func() (Conn, error) {
-			conn, err := net.Dial("tcp", server)
-			if err != nil {
-				return nil, err
-			}
-			return conn, err
-		},
-	}
-	pool.MaxIdleConns = defaultMaxIdleConns
-	pool.IdleTimeout = defaultIdleTimeout
-	pool.SocketTimeout = defaultSocketTimeout
-	return &Client{server: server, protocol: TextProtocol{pool: &pool}, noreply: true}, nil
+	client := &Client{server: server, noreply: true}
+	err := client.SetProtocol("text")
+	return client, err
 }
 
 // SetMaxIdleConns set max idle connections
 func (client *Client) SetMaxIdleConns(maxIdleConns int) {
 	client.protocol.setMaxIdleConns(maxIdleConns)
+}
+
+func (client *Client) SetMaxActiveConns(maxActiveConns int) {
+	client.protocol.setMaxActiveConns(maxActiveConns)
 }
 
 // SetIdleTiemout set connection idle timeout
@@ -112,10 +108,11 @@ func (client *Client) SetProtocol(protocol string) error {
 			}
 			return conn, err
 		},
+		IdleTimeout:    defaultIdleTimeout,
+		SocketTimeout:  defaultSocketTimeout,
+		MaxIdleConns:   defaultMaxIdleConns,
+		MaxActiveConns: defaultMaxActiveConns,
 	}
-	pool.MaxIdleConns = defaultMaxIdleConns
-	pool.IdleTimeout = defaultIdleTimeout
-	pool.SocketTimeout = defaultSocketTimeout
 	if protocol == "text" {
 		client.protocol = TextProtocol{pool: &pool}
 	} else {

@@ -22,6 +22,10 @@ func (protocol TextProtocol) setMaxIdleConns(maxIdleConns int) {
 	protocol.pool.MaxIdleConns = maxIdleConns
 }
 
+func (protocol TextProtocol) setMaxActiveConns(maxActiveConns int) {
+	protocol.pool.MaxActiveConns = maxActiveConns
+}
+
 func (protocol TextProtocol) setIdleTimeout(timeout time.Duration) {
 	if timeout < protocol.pool.SocketTimeout {
 		timeout = protocol.pool.SocketTimeout

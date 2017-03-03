@@ -17,10 +17,12 @@ func init() {
 		os.Exit(1)
 	}
 	client.SetProtocol("binary")
+	client.SetSocketTimeout(time.Duration(5 * time.Second))
 	textClient, err = NewClient("127.0.0.1:11211")
 	if err != nil {
 		os.Exit(1)
 	}
+	textClient.SetSocketTimeout(time.Duration(5 * time.Second))
 }
 
 type TestCase struct {

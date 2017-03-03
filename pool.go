@@ -20,14 +20,16 @@ type Conn net.Conn
 
 // Pool goroutine safe connection pool
 type Pool struct {
-	DialFunc      func() (Conn, error)
-	MaxIdleConns  int
-	IdleTimeout   time.Duration
-	SocketTimeout time.Duration
+	DialFunc       func() (Conn, error)
+	MaxIdleConns   int
+	MaxActiveConns int
+	IdleTimeout    time.Duration
+	SocketTimeout  time.Duration
 
-	closed    bool
-	mu        sync.Mutex
-	idleConns []*idleConn // idle connections list, latest connection appending the last
+	mu          sync.Mutex
+	closed      bool
+	idleConns   []*idleConn // idle connections list, latest connection appending the last
+	activeConns int
 }
 
 // Conn net connection with idle timeout
@@ -42,6 +44,9 @@ func (pool *Pool) Get() (*idleConn, error) {
 	defer pool.mu.Unlock()
 	if pool.closed {
 		return nil, errPoolClosed
+	}
+	if pool.activeConns > pool.MaxActiveConns {
+		return nil, ErrPoolExhausted
 	}
 	expiredSince := nowFunc().Add(-pool.IdleTimeout)
 	index := len(pool.idleConns)
@@ -63,8 +68,13 @@ func (pool *Pool) Get() (*idleConn, error) {
 		if err != nil {
 			return nil, err
 		}
+		if err = c.SetDeadline(time.Now().Add(pool.SocketTimeout)); err != nil {
+			return nil, err
+		}
+		pool.activeConns++
 		return &idleConn{c, nowFunc()}, nil
 	}
+	pool.activeConns++
 	conn := pool.idleConns[numIdle-1]
 	pool.idleConns = pool.idleConns[:numIdle-1]
 	return conn, nil
@@ -74,6 +84,7 @@ func (pool *Pool) Get() (*idleConn, error) {
 func (pool *Pool) Put(ic *idleConn) error {
 	pool.mu.Lock()
 	defer pool.mu.Unlock()
+	pool.activeConns--
 	if pool.closed || len(pool.idleConns) >= pool.MaxIdleConns {
 		return ic.Close()
 	}
@@ -89,6 +100,7 @@ func (pool *Pool) Close() error {
 		return nil
 	}
 	for _, ic := range pool.idleConns {
+		pool.activeConns--
 		if err := ic.Close(); err != nil {
 			return err
 		}

@@ -186,6 +186,10 @@ func (protocol BinaryProtocol) setMaxIdleConns(maxIdleConns int) {
 	protocol.pool.MaxIdleConns = maxIdleConns
 }
 
+func (protocol BinaryProtocol) setMaxActiveConns(maxActiveConns int) {
+	protocol.pool.MaxActiveConns = maxActiveConns
+}
+
 func (protocol BinaryProtocol) setIdleTimeout(timeout time.Duration) {
 	protocol.pool.IdleTimeout = timeout
 }
