@@ -3,6 +3,9 @@ language: go
 services:
     - memcached
 
+before_script:
+    - memcached -p 11213 -d
+
 go:
     - 1.6
     - 1.7.x

@@ -12,17 +12,15 @@ var client, textClient *Client
 
 func init() {
 	var err error
-	client, err = NewClient("127.0.0.1:11211")
+	client, err = NewClient([]string{"127.0.0.1:11211", "127.0.0.1:11213"})
 	if err != nil {
 		os.Exit(1)
 	}
 	client.SetProtocol("binary")
-	client.SetSocketTimeout(time.Duration(5 * time.Second))
-	textClient, err = NewClient("127.0.0.1:11211")
+	textClient, err = NewClient([]string{"127.0.0.1:11211", "127.0.0.1:11213"})
 	if err != nil {
 		os.Exit(1)
 	}
-	textClient.SetSocketTimeout(time.Duration(5 * time.Second))
 }
 
 type TestCase struct {

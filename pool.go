@@ -2,6 +2,7 @@ package gomemcache
 
 import (
 	"errors"
+	"log"
 	"net"
 	"sync"
 	"time"
@@ -35,7 +36,16 @@ type Pool struct {
 // Conn net connection with idle timeout
 type idleConn struct {
 	Conn
+	err    error
 	idleAt time.Time
+}
+
+func (conn *idleConn) SetError(err error) {
+	conn.err = err
+}
+
+func (conn *idleConn) CheckError() bool {
+	return conn.err != nil
 }
 
 // Get get a connection from idle conns
@@ -46,6 +56,8 @@ func (pool *Pool) Get() (*idleConn, error) {
 		return nil, errPoolClosed
 	}
 	if pool.activeConns > pool.MaxActiveConns {
+		log.Printf("max active conns: %d, current active conns: %s, current idle conns: %s",
+			pool.MaxActiveConns, pool.activeConns, len(pool.idleConns))
 		return nil, ErrPoolExhausted
 	}
 	expiredSince := nowFunc().Add(-pool.IdleTimeout)
@@ -68,15 +80,19 @@ func (pool *Pool) Get() (*idleConn, error) {
 		if err != nil {
 			return nil, err
 		}
-		if err = c.SetDeadline(time.Now().Add(pool.SocketTimeout)); err != nil {
+		if err = c.SetDeadline(nowFunc().Add(pool.SocketTimeout)); err != nil {
 			return nil, err
 		}
 		pool.activeConns++
-		return &idleConn{c, nowFunc()}, nil
+		log.Printf("after create new client, current active conns: %d", pool.activeConns)
+		return &idleConn{Conn: c}, nil
 	}
 	pool.activeConns++
 	conn := pool.idleConns[numIdle-1]
 	pool.idleConns = pool.idleConns[:numIdle-1]
+	if err := conn.SetDeadline(nowFunc().Add(pool.SocketTimeout)); err != nil {
+		return nil, err
+	}
 	return conn, nil
 }
 
@@ -85,9 +101,10 @@ func (pool *Pool) Put(ic *idleConn) error {
 	pool.mu.Lock()
 	defer pool.mu.Unlock()
 	pool.activeConns--
-	if pool.closed || len(pool.idleConns) >= pool.MaxIdleConns {
+	if pool.closed || len(pool.idleConns) >= pool.MaxIdleConns || ic.CheckError() {
 		return ic.Close()
 	}
+	ic.idleAt = nowFunc()
 	pool.idleConns = append(pool.idleConns, ic)
 	return nil
 }

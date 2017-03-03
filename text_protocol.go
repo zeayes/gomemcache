@@ -9,32 +9,13 @@ import (
 	"io"
 	"strconv"
 	"strings"
-	"time"
+	"sync"
 )
 
 const defaultItemValueSize = 1024
 
 type TextProtocol struct {
-	pool *Pool
-}
-
-func (protocol TextProtocol) setMaxIdleConns(maxIdleConns int) {
-	protocol.pool.MaxIdleConns = maxIdleConns
-}
-
-func (protocol TextProtocol) setMaxActiveConns(maxActiveConns int) {
-	protocol.pool.MaxActiveConns = maxActiveConns
-}
-
-func (protocol TextProtocol) setIdleTimeout(timeout time.Duration) {
-	if timeout < protocol.pool.SocketTimeout {
-		timeout = protocol.pool.SocketTimeout
-	}
-	protocol.pool.IdleTimeout = timeout
-}
-
-func (protocol TextProtocol) setSocketTimeout(timeout time.Duration) {
-	protocol.pool.SocketTimeout = timeout
+	baseProtocol
 }
 
 func (protocol TextProtocol) store(cmd string, item *Item) error {
@@ -71,16 +52,22 @@ func (protocol TextProtocol) store(cmd string, item *Item) error {
 		buf = append(buf, item.Value...)
 		buf = append(buf, "\r\n"...)
 	}
-	conn, err := protocol.pool.Get()
+	var index uint32
+	if protocol.poolSize != 1 {
+		index = protocol.getPoolIndex(item.Key)
+	}
+	pool := protocol.pools[index]
+	conn, err := pool.Get()
 	if err != nil {
 		return err
 	}
 	if _, err = conn.Write(buf); err != nil {
-		conn.Close()
+		conn.SetError(err)
+		pool.Put(conn)
 		return err
 	}
 	if op.quiet {
-		protocol.pool.Put(conn)
+		pool.Put(conn)
 		return nil
 	}
 	// 12 is the max bytes size read from server
@@ -88,10 +75,9 @@ func (protocol TextProtocol) store(cmd string, item *Item) error {
 	n, err := conn.Read(b)
 	err = protocol.checkError(b[:n], err)
 	if err == ErrOperationNotSupported {
-		conn.Close()
-	} else {
-		protocol.pool.Put(conn)
+		conn.SetError(err)
 	}
+	pool.Put(conn)
 	return err
 }
 
@@ -118,6 +104,38 @@ func (protocol TextProtocol) checkError(buf []byte, err error) error {
 }
 
 func (protocol TextProtocol) fetch(keys []string, withCAS bool) (map[string]*Item, error) {
+	if protocol.poolSize == 1 {
+		return protocol.fetchFromServer(0, keys, withCAS)
+	}
+	array := make([][]string, protocol.poolSize)
+	for _, key := range keys {
+		index := protocol.getPoolIndex(key)
+		array[index] = append(array[index], key)
+	}
+	var wg sync.WaitGroup
+	var err error
+	results := make(map[string]*Item, len(keys))
+	for index, ks := range array {
+		if ks == nil {
+			continue
+		}
+		wg.Add(1)
+		go func(idx int, iks []string, cas bool) {
+			result, e := protocol.fetchFromServer(idx, iks, cas)
+			if e != nil {
+				err = e
+			}
+			for k, v := range result {
+				results[k] = v
+			}
+			wg.Done()
+		}(index, ks, withCAS)
+	}
+	wg.Wait()
+	return results, err
+}
+
+func (protocol TextProtocol) fetchFromServer(index int, keys []string, withCAS bool) (map[string]*Item, error) {
 	var cmd []byte
 	if withCAS {
 		cmd = []byte("gets")
@@ -137,13 +155,15 @@ func (protocol TextProtocol) fetch(keys []string, withCAS bool) (map[string]*Ite
 	}
 	buf = append(buf, '\r')
 	buf = append(buf, '\n')
-	conn, err := protocol.pool.Get()
+	pool := protocol.pools[index]
+	conn, err := pool.Get()
 	if err != nil {
 		return nil, err
 	}
 	_, err = conn.Write(buf)
 	if err != nil {
-		conn.Close()
+		conn.SetError(err)
+		pool.Put(conn)
 		return nil, err
 	}
 	result := make(map[string]*Item, len(keys))
@@ -151,11 +171,12 @@ func (protocol TextProtocol) fetch(keys []string, withCAS bool) (map[string]*Ite
 	for {
 		line, err := reader.ReadSlice('\n')
 		if err != nil {
-			conn.Close()
+			conn.SetError(err)
+			pool.Put(conn)
 			return nil, err
 		}
 		if bytes.Equal(line, []byte("END\r\n")) {
-			protocol.pool.Put(conn)
+			pool.Put(conn)
 			return result, nil
 		}
 		values := strings.Split(string(line[6:len(line)-2]), " ")
@@ -165,25 +186,29 @@ func (protocol TextProtocol) fetch(keys []string, withCAS bool) (map[string]*Ite
 		}
 		flags, err := strconv.ParseUint(values[1], 10, 32)
 		if err != nil {
-			conn.Close()
+			conn.SetError(err)
+			pool.Put(conn)
 			return nil, err
 		}
 		size, err := strconv.ParseUint(values[2], 10, 32)
 		if err != nil {
-			conn.Close()
+			conn.SetError(err)
+			pool.Put(conn)
 			return nil, err
 		}
 		value := make([]byte, size+2)
 		// include the delimiter \r\n
 		n, err := io.ReadFull(reader, value)
 		if err != nil || uint64(n) != size+2 {
-			conn.Close()
+			conn.SetError(err)
+			pool.Put(conn)
 			return nil, err
 		}
 		item := &Item{Key: values[0], Value: value[:size], Flags: uint32(flags)}
 		if num == 4 {
 			if item.CAS, err = strconv.ParseUint(values[3], 10, 64); err != nil {
-				conn.Close()
+				conn.SetError(err)
+				pool.Put(conn)
 				return nil, err
 			}
 		}

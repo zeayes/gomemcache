@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
-	"time"
+	"sync"
 )
 
 const (
@@ -179,26 +179,42 @@ func (pkt *packet) read(reader io.Reader) error {
 
 // BinaryProtocol implements binary protocol
 type BinaryProtocol struct {
-	pool *Pool
-}
-
-func (protocol BinaryProtocol) setMaxIdleConns(maxIdleConns int) {
-	protocol.pool.MaxIdleConns = maxIdleConns
-}
-
-func (protocol BinaryProtocol) setMaxActiveConns(maxActiveConns int) {
-	protocol.pool.MaxActiveConns = maxActiveConns
-}
-
-func (protocol BinaryProtocol) setIdleTimeout(timeout time.Duration) {
-	protocol.pool.IdleTimeout = timeout
-}
-
-func (protocol BinaryProtocol) setSocketTimeout(timeout time.Duration) {
-	protocol.pool.SocketTimeout = timeout
+	baseProtocol
 }
 
 func (protocol BinaryProtocol) fetch(keys []string, withCAS bool) (map[string]*Item, error) {
+	if protocol.poolSize == 1 {
+		return protocol.fetchFromServer(0, keys, withCAS)
+	}
+	array := make([][]string, protocol.poolSize)
+	for _, key := range keys {
+		index := protocol.getPoolIndex(key)
+		array[index] = append(array[index], key)
+	}
+	var wg sync.WaitGroup
+	var err error
+	results := make(map[string]*Item, len(keys))
+	for index, ks := range array {
+		if ks == nil {
+			continue
+		}
+		wg.Add(1)
+		go func(idx int, iks []string, cas bool) {
+			result, e := protocol.fetchFromServer(idx, iks, cas)
+			if e != nil {
+				err = e
+			}
+			for k, v := range result {
+				results[k] = v
+			}
+			wg.Done()
+		}(index, ks, withCAS)
+	}
+	wg.Wait()
+	return results, err
+}
+
+func (protocol BinaryProtocol) fetchFromServer(index int, keys []string, withCAS bool) (map[string]*Item, error) {
 	count := len(keys)
 	buffer := new(bytes.Buffer)
 	for index, key := range keys {
@@ -219,12 +235,14 @@ func (protocol BinaryProtocol) fetch(keys []string, withCAS bool) (map[string]*I
 			return nil, err
 		}
 	}
-	conn, err := protocol.pool.Get()
+	pool := protocol.pools[index]
+	conn, err := pool.Get()
 	if err != nil {
 		return nil, err
 	}
 	if _, err = buffer.WriteTo(conn); err != nil {
-		conn.Close()
+		conn.SetError(err)
+		pool.Put(conn)
 		return nil, err
 	}
 	lastKey := keys[count-1]
@@ -234,10 +252,9 @@ func (protocol BinaryProtocol) fetch(keys []string, withCAS bool) (map[string]*I
 		err = pkt.read(conn)
 		if err != nil && err != ErrItemNotFound {
 			if pkt.status != 0 {
-				conn.Close()
-			} else {
-				protocol.pool.Put(conn)
+				conn.SetError(err)
 			}
+			pool.Put(conn)
 			return nil, err
 		}
 		// skip if the key doesn't exist
@@ -255,7 +272,7 @@ func (protocol BinaryProtocol) fetch(keys []string, withCAS bool) (map[string]*I
 			break
 		}
 	}
-	if err = protocol.pool.Put(conn); err != nil {
+	if err = pool.Put(conn); err != nil {
 		return nil, err
 	}
 	return results, nil
@@ -301,28 +318,33 @@ func (protocol BinaryProtocol) store(cmd string, item *Item) error {
 		pkt.extrasLength = uint8(extrasLength)
 		pkt.bodyLength = uint32(pkt.keyLength) + uint32(extrasLength)
 	}
-	conn, err := protocol.pool.Get()
+	var index uint32
+	if protocol.poolSize != 1 {
+		index = protocol.getPoolIndex(item.Key)
+	}
+	pool := protocol.pools[index]
+	conn, err := pool.Get()
 	if err != nil {
 		return err
 	}
 	if err = pkt.write(conn); err != nil {
-		conn.Close()
+		conn.SetError(err)
+		pool.Put(conn)
 		return err
 	}
 	if op.quiet {
-		protocol.pool.Put(conn)
+		pool.Put(conn)
 		return err
 	}
 	if err := pkt.read(conn); err != nil {
 		if pkt.status != 0 {
-			conn.Close()
-		} else {
-			protocol.pool.Put(conn)
+			conn.SetError(err)
 		}
+		pool.Put(conn)
 		return err
 	}
 	item.Value = pkt.value
 	item.CAS = pkt.cas
-	protocol.pool.Put(conn)
+	pool.Put(conn)
 	return nil
 }

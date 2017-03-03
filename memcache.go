@@ -3,6 +3,7 @@ package gomemcache
 import (
 	"errors"
 	"fmt"
+	"hash/crc32"
 	"net"
 	"time"
 )
@@ -48,9 +49,46 @@ type Protocol interface {
 	fetch(keys []string, withCAS bool) (map[string]*Item, error)
 }
 
+type baseProtocol struct {
+	pools    []*Pool
+	poolSize uint32
+	hashFunc func(buf []byte) uint32
+}
+
+func (protocol baseProtocol) getPoolIndex(key string) uint32 {
+	return protocol.hashFunc([]byte(key)) % protocol.poolSize
+}
+
+func (protocol baseProtocol) setMaxIdleConns(maxIdleConns int) {
+	for _, pool := range protocol.pools {
+		pool.MaxIdleConns = maxIdleConns
+	}
+}
+
+func (protocol baseProtocol) setMaxActiveConns(maxActiveConns int) {
+	for _, pool := range protocol.pools {
+		pool.MaxActiveConns = maxActiveConns
+	}
+}
+
+func (protocol baseProtocol) setIdleTimeout(timeout time.Duration) {
+	for _, pool := range protocol.pools {
+		if timeout < pool.SocketTimeout {
+			timeout = pool.SocketTimeout
+		}
+		pool.IdleTimeout = timeout
+	}
+}
+
+func (protocol baseProtocol) setSocketTimeout(timeout time.Duration) {
+	for _, pool := range protocol.pools {
+		pool.SocketTimeout = timeout
+	}
+}
+
 // Client memcache client for writing and reading
 type Client struct {
-	server   string
+	servers  []string
 	protocol Protocol
 	noreply  bool
 }
@@ -70,8 +108,8 @@ func invalidKey(key string) bool {
 }
 
 // NewClient create memcache client
-func NewClient(server string) (*Client, error) {
-	client := &Client{server: server, noreply: true}
+func NewClient(servers []string) (*Client, error) {
+	client := &Client{servers: servers, noreply: true}
 	err := client.SetProtocol("text")
 	return client, err
 }
@@ -100,23 +138,35 @@ func (client *Client) SetProtocol(protocol string) error {
 	if protocol != "text" && protocol != "binary" {
 		return fmt.Errorf("only support 'text' and 'binary' protocol")
 	}
-	pool := Pool{
-		DialFunc: func() (Conn, error) {
-			conn, err := net.Dial("tcp", client.server)
-			if err != nil {
-				return nil, err
-			}
-			return conn, err
+	poolSize := len(client.servers)
+	pools := make([]*Pool, 0, poolSize)
+	for _, server := range client.servers {
+		pool := Pool{
+			DialFunc: func() (Conn, error) {
+				conn, err := net.Dial("tcp", server)
+				if err != nil {
+					return nil, err
+				}
+				return conn, err
+			},
+			IdleTimeout:    defaultIdleTimeout,
+			SocketTimeout:  defaultSocketTimeout,
+			MaxIdleConns:   defaultMaxIdleConns,
+			MaxActiveConns: defaultMaxActiveConns,
+		}
+		pools = append(pools, &pool)
+	}
+	base := baseProtocol{
+		pools:    pools,
+		poolSize: uint32(poolSize),
+		hashFunc: func(buf []byte) uint32 {
+			return (((crc32.ChecksumIEEE(buf) & 0xffffffff) >> 16) & 0x7fff) | 1
 		},
-		IdleTimeout:    defaultIdleTimeout,
-		SocketTimeout:  defaultSocketTimeout,
-		MaxIdleConns:   defaultMaxIdleConns,
-		MaxActiveConns: defaultMaxActiveConns,
 	}
 	if protocol == "text" {
-		client.protocol = TextProtocol{pool: &pool}
+		client.protocol = TextProtocol{base}
 	} else {
-		client.protocol = BinaryProtocol{pool: &pool}
+		client.protocol = BinaryProtocol{base}
 	}
 	return nil
 }
