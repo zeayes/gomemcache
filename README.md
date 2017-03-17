@@ -27,7 +27,7 @@ import (
 )
 
 func main() {
-	client, err := gomemcache.NewClient("127.0.0.1:11211")
+	client, err := gomemcache.NewClient([]string{"127.0.0.1:11211"})
 	if err != nil {
 		log.Fatalf("init client error: %v", err)
 	}
