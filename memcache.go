@@ -12,7 +12,7 @@ const (
 	defaultMaxIdleConns   = 10
 	defaultMaxActiveConns = 20
 	defaultIdleTimeout    = 600 * time.Second
-	defaultSocketTimeout  = 100 * time.Millisecond
+	defaultSocketTimeout  = 2 * time.Second
 )
 
 var (

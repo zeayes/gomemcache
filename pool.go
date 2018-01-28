@@ -5,16 +5,36 @@ import (
 	"log"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
-var nowFunc = time.Now // for testing
-
 var (
+	nowFunc = CoarseTimeNow
+	// nowFunc = time.Now
 	// ErrPoolExhausted idle connection pool exhausted
 	ErrPoolExhausted = errors.New("connection pool exhausted")
 	errPoolClosed    = errors.New("pool is closed ")
+	// https://github.com/valyala/fasthttp/blob/master/coarseTime.go
+	coarseTime atomic.Value
 )
+
+func CoarseTimeNow() time.Time {
+	tp := coarseTime.Load().(*time.Time)
+	return *tp
+}
+
+func init() {
+	t := time.Now().Truncate(time.Second)
+	coarseTime.Store(&t)
+	go func() {
+		for {
+			time.Sleep(time.Second)
+			t := time.Now().Truncate(time.Second)
+			coarseTime.Store(&t)
+		}
+	}()
+}
 
 // Conn connection used in pool
 type Conn net.Conn
@@ -50,16 +70,15 @@ func (conn *idleConn) CheckError() bool {
 
 // Get get a connection from idle conns
 func (pool *Pool) Get() (*idleConn, error) {
-	pool.mu.Lock()
-	defer pool.mu.Unlock()
 	if pool.closed {
 		return nil, errPoolClosed
 	}
 	if pool.activeConns > pool.MaxActiveConns {
-		log.Printf("max active conns: %d, current active conns: %s, current idle conns: %s",
+		log.Printf("max active conns: %d, current active conns: %d, current idle conns: %d",
 			pool.MaxActiveConns, pool.activeConns, len(pool.idleConns))
 		return nil, ErrPoolExhausted
 	}
+	pool.mu.Lock()
 	expiredSince := nowFunc().Add(-pool.IdleTimeout)
 	index := len(pool.idleConns)
 	for idx, ic := range pool.idleConns {
@@ -68,8 +87,10 @@ func (pool *Pool) Get() (*idleConn, error) {
 			index = idx
 			break
 		}
+		pool.idleConns[idx] = nil
 		// close expired connection
 		if err := ic.Close(); err != nil {
+			pool.mu.Unlock()
 			return nil, err
 		}
 	}
@@ -78,18 +99,23 @@ func (pool *Pool) Get() (*idleConn, error) {
 	if numIdle == 0 {
 		c, err := pool.DialFunc()
 		if err != nil {
+			pool.mu.Unlock()
 			return nil, err
 		}
 		if err = c.SetDeadline(nowFunc().Add(pool.SocketTimeout)); err != nil {
+			pool.mu.Unlock()
 			return nil, err
 		}
 		pool.activeConns++
 		log.Printf("after create new client, current active conns: %d", pool.activeConns)
+		pool.mu.Unlock()
 		return &idleConn{Conn: c}, nil
 	}
 	pool.activeConns++
 	conn := pool.idleConns[numIdle-1]
+	pool.idleConns[numIdle-1] = nil
 	pool.idleConns = pool.idleConns[:numIdle-1]
+	pool.mu.Unlock()
 	if err := conn.SetDeadline(nowFunc().Add(pool.SocketTimeout)); err != nil {
 		return nil, err
 	}

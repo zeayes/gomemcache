@@ -8,11 +8,8 @@ import (
 	"fmt"
 	"io"
 	"strconv"
-	"strings"
 	"sync"
 )
-
-const defaultItemValueSize = 1024
 
 type TextProtocol struct {
 	baseProtocol
@@ -179,39 +176,33 @@ func (protocol TextProtocol) fetchFromServer(index int, keys []string, withCAS b
 			pool.Put(conn)
 			return result, nil
 		}
-		values := strings.Split(string(line[6:len(line)-2]), " ")
-		num := len(values)
-		if num != 3 && num != 4 {
-			return nil, ErrInvalidResponseFormat
-		}
-		flags, err := strconv.ParseUint(values[1], 10, 32)
-		if err != nil {
-			conn.SetError(err)
-			pool.Put(conn)
-			return nil, err
-		}
-		size, err := strconv.ParseUint(values[2], 10, 32)
-		if err != nil {
-			conn.SetError(err)
-			pool.Put(conn)
-			return nil, err
+		var key string
+		var cas uint64
+		var num, size, flags int
+		line = line[6 : len(line)-2]
+		for idx, row := range line {
+			if row == 32 || row == 13 {
+				if num == 0 {
+					key = string(line[0:idx])
+				}
+				num += 1
+			} else if num == 1 {
+				flags = flags*10 + int(row-48)
+			} else if num == 2 {
+				size = size*10 + int(row-48)
+			} else if num == 3 {
+				cas = cas*10 + uint64(row-48)
+			}
 		}
 		value := make([]byte, size+2)
 		// include the delimiter \r\n
 		n, err := io.ReadFull(reader, value)
-		if err != nil || uint64(n) != size+2 {
+		if err != nil || n != size+2 {
 			conn.SetError(err)
 			pool.Put(conn)
 			return nil, err
 		}
-		item := &Item{Key: values[0], Value: value[:size], Flags: uint32(flags)}
-		if num == 4 {
-			if item.CAS, err = strconv.ParseUint(values[3], 10, 64); err != nil {
-				conn.SetError(err)
-				pool.Put(conn)
-				return nil, err
-			}
-		}
+		item := &Item{Key: key, Value: value[:size], Flags: uint32(flags), CAS: cas}
 		result[item.Key] = item
 	}
 }
