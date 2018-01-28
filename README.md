@@ -54,12 +54,12 @@ Benchmark
 ===========
 benchmark on MBP(Mid 2015 2.2 GHz 16GB), and memcached served by default options.
 ```
-BenchmarkBinarySet-8        	   50000	     42430 ns/op	     120 B/op	       4 allocs/op
-BenchmarkBinaryGet-8        	   30000	     49131 ns/op	     944 B/op	      16 allocs/op
-BenchmarkBinaryMultiGet-8   	   10000	    103043 ns/op	    5161 B/op	      76 allocs/op
-BenchmarkTextSet-8          	  200000	      7356 ns/op	     120 B/op	       4 allocs/op
-BenchmarkTextGet-8          	   30000	     44360 ns/op	    4952 B/op	      16 allocs/op
-BenchmarkTextMultiGet-8     	   20000	     63289 ns/op	    6888 B/op	      55 allocs/op
+BenchmarkBinarySet-8        	   50000	     37790 ns/op	     120 B/op	       4 allocs/op
+BenchmarkBinaryGet-8        	   30000	     45864 ns/op	     480 B/op	      15 allocs/op
+BenchmarkBinaryMultiGet-8   	   20000	     89126 ns/op	    4416 B/op	      75 allocs/op
+BenchmarkTextSet-8          	  200000	      6937 ns/op	     120 B/op	       4 allocs/op
+BenchmarkTextGet-8          	   30000	     42921 ns/op	    4488 B/op	      15 allocs/op
+BenchmarkTextMultiGet-8     	   30000	     54572 ns/op	    6144 B/op	      54 allocs/op
 ```
 
 License

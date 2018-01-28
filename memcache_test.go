@@ -256,9 +256,13 @@ func TestMultiGet(t *testing.T) {
 			keys = append(keys, key)
 			expect[key] = value
 		}
-		result, err := testcase.client.MultiGet(keys)
+		items, err := testcase.client.MultiGet(keys)
 		if err != nil {
 			t.Fatalf("get error: %v", err)
+		}
+		result := make(map[string]*Item, len(items))
+		for _, item := range items {
+			result[item.Key] = item
 		}
 		for k, v := range expect {
 			if _, ok := result[k]; !ok {
@@ -293,9 +297,13 @@ func TestMultiGetWithRepeatKeys(t *testing.T) {
 			}
 			expect[key] = value
 		}
-		result, err := testcase.client.MultiGet(keys)
+		items, err := testcase.client.MultiGet(keys)
 		if err != nil {
 			t.Fatalf("get error: %v", err)
+		}
+		result := make(map[string]*Item, len(items))
+		for _, item := range items {
+			result[item.Key] = item
 		}
 		for k, v := range expect {
 			if _, ok := result[k]; !ok {

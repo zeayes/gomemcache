@@ -46,7 +46,7 @@ type Protocol interface {
 	setIdleTimeout(timeout time.Duration)
 	setSocketTimeout(timeout time.Duration)
 	store(command string, item *Item) error
-	fetch(keys []string, withCAS bool) (map[string]*Item, error)
+	fetch(keys []string, withCAS bool) ([]*Item, error)
 }
 
 type baseProtocol struct {
@@ -225,10 +225,10 @@ func (client *Client) Gets(key string) (*Item, error) {
 	if err != nil {
 		return nil, err
 	}
-	if item, ok := items[key]; ok {
-		return item, nil
+	if len(items) == 0 {
+		return nil, nil
 	}
-	return nil, nil
+	return items[0], nil
 }
 
 // Get retrieve an item from the server with a key.
@@ -240,14 +240,14 @@ func (client *Client) Get(key string) (*Item, error) {
 	if err != nil {
 		return nil, err
 	}
-	if item, ok := items[key]; ok {
-		return item, nil
+	if len(items) == 0 {
+		return nil, nil
 	}
-	return nil, nil
+	return items[0], nil
 }
 
 // MultiGet retrieve bulk items with some keys
-func (client *Client) MultiGet(keys []string) (map[string]*Item, error) {
+func (client *Client) MultiGet(keys []string) ([]*Item, error) {
 	ks := keys[:0]
 	for _, key := range keys {
 		exists := false

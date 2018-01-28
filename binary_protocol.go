@@ -182,7 +182,7 @@ type BinaryProtocol struct {
 	baseProtocol
 }
 
-func (protocol BinaryProtocol) fetch(keys []string, withCAS bool) (map[string]*Item, error) {
+func (protocol BinaryProtocol) fetch(keys []string, withCAS bool) ([]*Item, error) {
 	if protocol.poolSize == 1 {
 		return protocol.fetchFromServer(0, keys, withCAS)
 	}
@@ -193,7 +193,7 @@ func (protocol BinaryProtocol) fetch(keys []string, withCAS bool) (map[string]*I
 	}
 	var wg sync.WaitGroup
 	var err error
-	results := make(map[string]*Item, len(keys))
+	results := make([]*Item, 0, len(keys))
 	for index, ks := range array {
 		if ks == nil {
 			continue
@@ -204,8 +204,8 @@ func (protocol BinaryProtocol) fetch(keys []string, withCAS bool) (map[string]*I
 			if e != nil {
 				err = e
 			}
-			for k, v := range result {
-				results[k] = v
+			if len(result) != 0 {
+				results = append(results, result...)
 			}
 			wg.Done()
 		}(index, ks, withCAS)
@@ -214,7 +214,7 @@ func (protocol BinaryProtocol) fetch(keys []string, withCAS bool) (map[string]*I
 	return results, err
 }
 
-func (protocol BinaryProtocol) fetchFromServer(index int, keys []string, withCAS bool) (map[string]*Item, error) {
+func (protocol BinaryProtocol) fetchFromServer(index int, keys []string, withCAS bool) ([]*Item, error) {
 	count := len(keys)
 	buffer := new(bytes.Buffer)
 	for index, key := range keys {
@@ -246,7 +246,7 @@ func (protocol BinaryProtocol) fetchFromServer(index int, keys []string, withCAS
 		return nil, err
 	}
 	lastKey := keys[count-1]
-	results := make(map[string]*Item, count)
+	results := make([]*Item, 0, count)
 	for {
 		pkt := new(packet)
 		err = pkt.read(conn)
@@ -266,7 +266,8 @@ func (protocol BinaryProtocol) fetchFromServer(index int, keys []string, withCAS
 			if pkt.extras != nil {
 				flags = binary.BigEndian.Uint32(pkt.extras)
 			}
-			results[pkt.key] = &Item{Key: pkt.key, Value: pkt.value, Flags: flags, CAS: pkt.cas}
+			item := &Item{Key: pkt.key, Value: pkt.value, Flags: flags, CAS: pkt.cas}
+			results = append(results, item)
 		}
 		if pkt.key == lastKey {
 			break

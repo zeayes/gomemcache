@@ -100,7 +100,7 @@ func (protocol TextProtocol) checkError(buf []byte, err error) error {
 	return fmt.Errorf("server response error %s doesn't define", string(buf))
 }
 
-func (protocol TextProtocol) fetch(keys []string, withCAS bool) (map[string]*Item, error) {
+func (protocol TextProtocol) fetch(keys []string, withCAS bool) ([]*Item, error) {
 	if protocol.poolSize == 1 {
 		return protocol.fetchFromServer(0, keys, withCAS)
 	}
@@ -111,7 +111,7 @@ func (protocol TextProtocol) fetch(keys []string, withCAS bool) (map[string]*Ite
 	}
 	var wg sync.WaitGroup
 	var err error
-	results := make(map[string]*Item, len(keys))
+	results := make([]*Item, 0, len(keys))
 	for index, ks := range array {
 		if ks == nil {
 			continue
@@ -122,8 +122,8 @@ func (protocol TextProtocol) fetch(keys []string, withCAS bool) (map[string]*Ite
 			if e != nil {
 				err = e
 			}
-			for k, v := range result {
-				results[k] = v
+			if len(result) != 0 {
+				results = append(results, result...)
 			}
 			wg.Done()
 		}(index, ks, withCAS)
@@ -132,7 +132,7 @@ func (protocol TextProtocol) fetch(keys []string, withCAS bool) (map[string]*Ite
 	return results, err
 }
 
-func (protocol TextProtocol) fetchFromServer(index int, keys []string, withCAS bool) (map[string]*Item, error) {
+func (protocol TextProtocol) fetchFromServer(index int, keys []string, withCAS bool) ([]*Item, error) {
 	var cmd []byte
 	if withCAS {
 		cmd = []byte("gets")
@@ -163,7 +163,7 @@ func (protocol TextProtocol) fetchFromServer(index int, keys []string, withCAS b
 		pool.Put(conn)
 		return nil, err
 	}
-	result := make(map[string]*Item, len(keys))
+	result := make([]*Item, 0, len(keys))
 	reader := bufio.NewReader(conn)
 	for {
 		line, err := reader.ReadSlice('\n')
@@ -203,6 +203,6 @@ func (protocol TextProtocol) fetchFromServer(index int, keys []string, withCAS b
 			return nil, err
 		}
 		item := &Item{Key: key, Value: value[:size], Flags: uint32(flags), CAS: cas}
-		result[item.Key] = item
+		result = append(result, item)
 	}
 }
