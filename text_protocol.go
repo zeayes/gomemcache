@@ -11,6 +11,30 @@ import (
 	"sync"
 )
 
+const (
+	getCmd  = "get"
+	getsCmd = "gets"
+	casCmd  = "cas"
+	incrCmd = "incr"
+	decrCmd = "decr"
+
+	zeroDelimiter     = '0'
+	spaceDelimiter    = ' '
+	carriageDelimiter = '\r'
+	newlineDelimiter  = '\n'
+)
+
+var (
+	noReplyDelimiter = []byte("noreply")
+
+	endDelimiter       = []byte("END\r\n")
+	existsDelimiter    = []byte("EXISTS\r\n")
+	storedDelimiter    = []byte("STORED\r\n")
+	deletedDelimiter   = []byte("DELETED\r\n")
+	notFoundDelimiter  = []byte("NOT_FOUND\r\n")
+	notStoredDelimiter = []byte("NOT_STORED\r\n")
+)
+
 type TextProtocol struct {
 	baseProtocol
 }
@@ -23,31 +47,31 @@ func (protocol TextProtocol) store(cmd string, item *Item) error {
 	isStored := isStoreOperation(op)
 	buf := make([]byte, 0)
 	buf = append(buf, op.command...)
-	buf = append(buf, ' ')
+	buf = append(buf, spaceDelimiter)
 	buf = append(buf, item.Key...)
-	buf = append(buf, ' ')
+	buf = append(buf, spaceDelimiter)
 	if isStored {
 		buf = append(buf, strconv.FormatUint(uint64(item.Flags), 10)...)
-		buf = append(buf, ' ')
+		buf = append(buf, spaceDelimiter)
 		buf = append(buf, strconv.FormatUint(uint64(item.Expiration), 10)...)
-		buf = append(buf, ' ')
+		buf = append(buf, spaceDelimiter)
 		buf = append(buf, strconv.Itoa(len(item.Value))...)
-		buf = append(buf, ' ')
-		if op.command == "cas" {
+		buf = append(buf, spaceDelimiter)
+		if op.command == casCmd {
 			buf = append(buf, strconv.FormatUint(item.CAS, 10)...)
-			buf = append(buf, ' ')
+			buf = append(buf, spaceDelimiter)
 		}
-	} else if op.command == "incr" || op.command == "decr" {
+	} else if op.command == incrCmd || op.command == decrCmd {
 		buf = append(buf, strconv.Itoa(len(item.Value))...)
-		buf = append(buf, ' ')
+		buf = append(buf, spaceDelimiter)
 	}
 	if op.quiet {
-		buf = append(buf, "noreply"...)
+		buf = append(buf, noReplyDelimiter...)
 	}
-	buf = append(buf, "\r\n"...)
+	buf = append(buf, carriageDelimiter, newlineDelimiter)
 	if isStored {
 		buf = append(buf, item.Value...)
-		buf = append(buf, "\r\n"...)
+		buf = append(buf, carriageDelimiter, newlineDelimiter)
 	}
 	var index uint32
 	if protocol.poolSize != 1 {
@@ -82,19 +106,19 @@ func (protocol TextProtocol) checkError(buf []byte, err error) error {
 	if err != nil {
 		return err
 	}
-	if bytes.Equal(buf, []byte("STORED\r\n")) {
+	if bytes.Equal(buf, storedDelimiter) {
 		return nil
 	}
-	if bytes.Equal(buf, []byte("NOT_STORED\r\n")) {
+	if bytes.Equal(buf, notStoredDelimiter) {
 		return ErrItemNotStored
 	}
-	if bytes.Equal(buf, []byte("EXISTS\r\n")) {
+	if bytes.Equal(buf, existsDelimiter) {
 		return ErrItemExists
 	}
-	if bytes.Equal(buf, []byte("NOT_FOUND\r\n")) {
+	if bytes.Equal(buf, notFoundDelimiter) {
 		return ErrItemNotFound
 	}
-	if bytes.Equal(buf, []byte("DELETED\r\n")) {
+	if bytes.Equal(buf, deletedDelimiter) {
 		return nil
 	}
 	return fmt.Errorf("server response error %s doesn't define", string(buf))
@@ -133,11 +157,11 @@ func (protocol TextProtocol) fetch(keys []string, withCAS bool) ([]*Item, error)
 }
 
 func (protocol TextProtocol) fetchFromServer(index int, keys []string, withCAS bool) ([]*Item, error) {
-	var cmd []byte
+	var cmd string
 	if withCAS {
-		cmd = []byte("gets")
+		cmd = getsCmd
 	} else {
-		cmd = []byte("get")
+		cmd = getCmd
 	}
 	count := len(keys)
 	length := count + len(cmd)
@@ -147,11 +171,10 @@ func (protocol TextProtocol) fetchFromServer(index int, keys []string, withCAS b
 	buf := make([]byte, 0, length+2)
 	buf = append(buf, cmd...)
 	for _, key := range keys {
-		buf = append(buf, ' ')
-		buf = append(buf, []byte(key)...)
+		buf = append(buf, spaceDelimiter)
+		buf = append(buf, key...)
 	}
-	buf = append(buf, '\r')
-	buf = append(buf, '\n')
+	buf = append(buf, carriageDelimiter, newlineDelimiter)
 	pool := protocol.pools[index]
 	conn, err := pool.Get()
 	if err != nil {
@@ -166,13 +189,13 @@ func (protocol TextProtocol) fetchFromServer(index int, keys []string, withCAS b
 	result := make([]*Item, 0, len(keys))
 	reader := bufio.NewReader(conn)
 	for {
-		line, err := reader.ReadSlice('\n')
+		line, err := reader.ReadSlice(newlineDelimiter)
 		if err != nil {
 			conn.SetError(err)
 			pool.Put(conn)
 			return nil, err
 		}
-		if bytes.Equal(line, []byte("END\r\n")) {
+		if bytes.Equal(line, endDelimiter) {
 			pool.Put(conn)
 			return result, nil
 		}
@@ -181,17 +204,17 @@ func (protocol TextProtocol) fetchFromServer(index int, keys []string, withCAS b
 		var num, size, flags int
 		line = line[6 : len(line)-2]
 		for idx, row := range line {
-			if row == 32 || row == 13 {
+			if row == spaceDelimiter || row == carriageDelimiter {
 				if num == 0 {
 					key = string(line[0:idx])
 				}
 				num += 1
 			} else if num == 1 {
-				flags = flags*10 + int(row-48)
+				flags = flags*10 + int(row-zeroDelimiter)
 			} else if num == 2 {
-				size = size*10 + int(row-48)
+				size = size*10 + int(row-zeroDelimiter)
 			} else if num == 3 {
-				cas = cas*10 + uint64(row-48)
+				cas = cas*10 + uint64(row-zeroDelimiter)
 			}
 		}
 		value := make([]byte, size+2)

@@ -10,31 +10,13 @@ import (
 )
 
 var (
-	nowFunc = CoarseTimeNow
-	// nowFunc = time.Now
+	nowFunc = time.Now
 	// ErrPoolExhausted idle connection pool exhausted
 	ErrPoolExhausted = errors.New("connection pool exhausted")
 	errPoolClosed    = errors.New("pool is closed ")
 	// https://github.com/valyala/fasthttp/blob/master/coarseTime.go
 	coarseTime atomic.Value
 )
-
-func CoarseTimeNow() time.Time {
-	tp := coarseTime.Load().(*time.Time)
-	return *tp
-}
-
-func init() {
-	t := time.Now().Truncate(time.Second)
-	coarseTime.Store(&t)
-	go func() {
-		for {
-			time.Sleep(time.Second)
-			t := time.Now().Truncate(time.Second)
-			coarseTime.Store(&t)
-		}
-	}()
-}
 
 // Conn connection used in pool
 type Conn net.Conn
