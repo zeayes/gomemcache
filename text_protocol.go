@@ -180,11 +180,18 @@ func (protocol TextProtocol) fetchFromServer(index int, keys []string, withCAS b
 	if err != nil {
 		return nil, err
 	}
-	_, err = conn.Write(buf)
-	if err != nil {
-		conn.SetError(err)
-		pool.Put(conn)
-		return nil, err
+	var total int
+	for {
+		c, err := conn.Write(buf[total:])
+		if err != nil {
+			conn.SetError(err)
+			pool.Put(conn)
+			return nil, err
+		}
+		total += c
+		if total == len(buf) {
+			break
+		}
 	}
 	result := make([]*Item, 0, len(keys))
 	reader := bufio.NewReader(conn)
@@ -202,13 +209,13 @@ func (protocol TextProtocol) fetchFromServer(index int, keys []string, withCAS b
 		var key string
 		var cas uint64
 		var num, size, flags int
-		line = line[6 : len(line)-2]
-		for idx, row := range line {
+		// line contains "VALUE <key> <flags> <bytes> [<cas unique>]\r\n"
+		for idx, row := range line[6 : len(line)-2] {
 			if row == spaceDelimiter || row == carriageDelimiter {
 				if num == 0 {
-					key = string(line[0:idx])
+					key = string(line[6 : 6+idx])
 				}
-				num += 1
+				num++
 			} else if num == 1 {
 				flags = flags*10 + int(row-zeroDelimiter)
 			} else if num == 2 {
